@@ -77,7 +77,7 @@ Direction from the playtest: make it a policy simulator, where every actor is se
 
 Cost (Node): one-ply plan for 19 actors 160 ms; rollout improvement (6×2) ~200 ms; a 20-game forecast ~0.8 s (Chromium: 680 ms); turn start with deep AI ~0.5 s (shallow ~0.25 s). Deep vs shallow AI in the player's seat, 3 seeds each (mean score, W/D/L): US 74 (1/2/0) → 79 (2/1/0); Israel 54 → 51; Iran 85 → 75; Turkey 70 (1/2/0) → 83 (3/0/0); Hezbollah 79 → 82. Not a clear strength gain (the nudge is deliberately small); the point is that moves are tested against everyone's replies.
 
-Balance observation surfaced by the forecasts (not changed): for the US, "war support collapses" (<25) in 65–85% of futures whatever the orders, and "ISIS resurgent" in 55–75%; the session-3 grind may be too harsh on the home front.
+Design decision (user call): for the US, "war support collapses" (<25) in 65–100% of futures whatever the orders. Kept as is: domestic support eroding through a long war is realistic, and the home front is meant to be the US player's binding constraint. "ISIS resurgent" in 55–75% of futures is the same kind of signal (chaos feeds it) and also stays.
 
 ### Dev hooks (`?dev=1`)
 `window.game`: `getState()` (includes `policies` and `forecast`), `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `forecast({ n, player })` (synchronous), `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`, `ai=shallow`, `noforecast`, `runs`.
