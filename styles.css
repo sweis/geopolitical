@@ -5,6 +5,7 @@
   --sea: #0a1520; --land: #222f3d; --land-stroke: #3a4b5e; --land-hi: #2d3f54;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark; /* deliberately single-theme: a dark situation-room display */
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 var(--sans); }
@@ -16,7 +17,7 @@ button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button.ghost { background: transparent; }
 .mono { font-family: var(--mono); }
 
-#app { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; height: 100dvh; }
+#app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
 #topbar { display: flex; align-items: center; gap: 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: #0d141b; flex-wrap: wrap; }
 .brand { display: flex; align-items: baseline; gap: 8px; }
 .brand .mark { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--red); box-shadow: inset 0 0 0 3px #0d141b, inset 0 0 0 6px var(--amber); align-self: center; }
