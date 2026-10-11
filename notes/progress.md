@@ -1,6 +1,6 @@
 # Progress notes — Red Lines (Middle East 2026)
 
-_Last updated: 2026-10-11 (session 2)._
+_Last updated: 2026-10-11 (session 4)._
 
 ## What exists
 A playable browser prototype. No build step: plain ES modules served statically.
@@ -64,8 +64,23 @@ AI-seat verdict sweep after: 15 W / 40 D / 2 L.
 ### Map: top-3 strip (session 3)
 Arcs retired (too small to read). After each turn the three most consequential happenings (ranked by score impact, chip weight, whether it was yours and moved anything, decisive/backfired) show as large cards along the bottom of the map with numbered pins (1 amber) on their theaters; clicking a card opens that theater's popover; "+N more" opens the briefing. Glyph clusters on the other theaters remain for drill-down.
 
+### Policy simulator (session 4)
+Direction from the playtest: make it a policy simulator, where every actor is self-interested, picks moves probabilistically, and the player sees which end states are likely and how each move narrows them.
+
+**Mixed strategies (`src/engine/ai.js`).** `scoreCandidates` evaluates every affordable (action, target) once at commit 0 by one-ply lookahead and records what each outcome does (a sparse diff of tracks, resources, influence, relations); higher commitment levels are scored in closed form from the same two outcomes. `rootPolicy` = softmax (T 0.6) over the top-k distinct moves — an actor's strategy is a distribution, and `sampleMove` draws from it. `fastPolicy` re-scores the recorded moves on any later board through a read-only overlay (no cloning), so simulated actors adapt as the game moves on (once Hormuz is open, escorting is worth nothing; once hit, retaliation rises) at ~1.3 ms per turn for all 19 actors.
+
+**Rollouts (`src/engine/rollout.js`).** `rolloutTurn` plays one turn on a clone: the player's seat by orders, by holding, or by the AI (cards dealt and answered); everyone else samples its strategy. Common random numbers: the clone reseeds at fixed points of every turn from (seed, turn), so two rollouts that differ in one move still see the same draws, rolls and events wherever their boards agree. `improvePolicies` tests each actor's top-k candidates in `rollouts` short games (H 2) in which the others respond (actors hit last turn re-plan), then nudges the one-ply gains by the anchored, clamped rollout advantage (anchor 0.25, clamp ±4). Rollout values are chaotic (one roll flips a war; across seeds the same candidate's value moved 10–20 points), which is why they nudge rather than replace: unanchored, the policies' total variation across seeds was 0.3–0.4; anchored 0.16. The browser runs rollouts 6 × horizon 2 (`?ai=shallow` for one-ply); Node tests run one-ply unless they set `setAIConfig`.
+
+**Forecasts.** `createForecast(s, plan, { n, player })` plays n games to turn 16 from the current board, one per `step()` so the UI time-slices it, and `summarize` gives win/draw/defeat odds, score bands per turn (p10/p25/p50/p75/p90), final-score spread, recurring end states (`END_STATES`, colored by the player's objectives), each objective's likely final value and how often it is met, and who reaches their victory bar. The same seed is shared across the "orders" and "hold" variants (paired comparison). Simulations never touch the main game (LIVE card cache keyed by simulation tag; no effect previews inside sims; option closures verified not to capture the dealing state: 3,247 options checked).
+
+**UI.** Futures tab (outcome bar; fan chart with the past line, 8-of-10 band, median, the holding median dashed, victory/defeat lines; likely end states; objectives at the end with now/median/range; who gets what they want; a cone of how the forecast narrowed turn by turn; how it is computed). Status bar: an Outlook gauge (click → Futures). Orders bar: outlook under the current orders with ▲/▼ win and loss vs holding. Briefing: outlook line patched in place when the new turn's forecast lands (win % was → is, final-score range was → is). Intel: assessed intentions, each actor's two likeliest moves with their probabilities. `holding` is computed once per turn, `orders` whenever the queued orders change (debounced 200 ms, 20 ms slices, cancelled on change). `?noforecast` disables it; `?runs=N` sets the game count (default 20).
+
+Cost (Node): one-ply plan for 19 actors 160 ms; rollout improvement (6×2) ~200 ms; a 20-game forecast ~0.8 s (Chromium: 680 ms); turn start with deep AI ~0.5 s (shallow ~0.25 s). Deep vs shallow AI in the player's seat, 3 seeds each (mean score, W/D/L): US 74 (1/2/0) → 79 (2/1/0); Israel 54 → 51; Iran 85 → 75; Turkey 70 (1/2/0) → 83 (3/0/0); Hezbollah 79 → 82. Not a clear strength gain (the nudge is deliberately small); the point is that moves are tested against everyone's replies.
+
+Balance observation surfaced by the forecasts (not changed): for the US, "war support collapses" (<25) in 65–85% of futures whatever the orders, and "ISIS resurgent" in 55–75%; the session-3 grind may be too harsh on the home front.
+
 ### Dev hooks (`?dev=1`)
-`window.game`: `getState()`, `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`.
+`window.game`: `getState()` (includes `policies` and `forecast`), `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `forecast({ n, player })` (synchronous), `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`, `ai=shallow`, `noforecast`, `runs`.
 Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader counts are null.
 
 ## Verified (session 2)
@@ -76,6 +91,11 @@ Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader 
 - Perf: turn compute ~100–250 ms in headless Chromium (proposals + 19 AI lookaheads + card generation + effect previews).
 - Visual pass verified by captures through the real page (turn screen, proposals/initiative, briefing) and the full suite (engine, situation probe, browser) passing afterwards.
 - Browser suite also asserts: status bar gauge and timeline present; scroll positions are 0 after a turn; ≥5 glyphs and ≥5 arcs on the map after a turn; clicking a theater with happenings opens the popover with rows and × closes it.
+
+## Verified (session 4)
+- `node tests/engine.mjs`: strategies sum to 1 and list distinct moves; a forecast leaves the state untouched, has 17 bands and outcomes summing to 1, carries objectives/end states/winners, is deterministic, and changes with the orders; the rollout-improved AI replays identically (turn start 170 ms at 2×2 in Node).
+- `node tests/browser.mjs`: through the real mouse path, holding and orders forecasts complete in the background (20 games, ~680 ms), the status bar and orders bar show the outlook with the comparison, the Futures tab renders the fan chart, end states and five objectives, Intel lists 18 actors' assessed intentions, the briefing's outlook line updates in place ("win 15% (was 20%)"), and the soak still finishes 16 turns in 10 s with the deep AI. Stills sweep and phone viewport unchanged.
+- Captures: `test-output/futures.png`, `futures-t4.png`, `futures-iran.png`, `cmd-outlook.png`, `intel.png`.
 
 ## Not verified
 - Human playtest of the new flow.
