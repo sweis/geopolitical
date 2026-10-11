@@ -299,3 +299,34 @@ export function endHtml(s) {
     <h2>Who gained most</h2><table class="lb">${rows.map(([id, v, st]) => `<tr class="${id === s.player ? 'me' : ''}"><td>${dot(id)}${esc(name(id))}</td><td class="n">${st.toFixed(0)} → ${v.toFixed(0)}</td><td class="n ${v - st >= 0 ? 'up' : 'down'}">${v - st >= 0 ? '+' : ''}${(v - st).toFixed(0)}</td></tr>`).join('')}</table>
     <div class="btnrow"><button data-act="closeModal">Review the map</button><button class="primary" data-act="newGame">New game</button></div></div>`;
 }
+
+// ── status bar (top of the page): turn timeline, score gauge, resources ──
+export function statusHtml(s) {
+  const segs = Array.from({ length: s.maxTurns }, (_, i) => `<i class="${i + 1 < s.turn ? 'past' : i + 1 === s.turn ? 'now' : ''}" title="Turn ${i + 1}"></i>`).join('');
+  let h = `<div class="sb-turn" title="Turn ${s.turn} of ${s.maxTurns}"><div class="tl">${segs}</div><span class="date">${fmtDate(dateOf(s.turn))} · ${s.turn}/${s.maxTurns}</span></div>`;
+  if (!s.player) return h;
+  const def = ACTOR_BY_ID[s.player], a = s.actors[s.player];
+  const sc = goalScore(def, s), th = thresholds(s, s.player);
+  const prev = s.history.length >= 2 ? s.history.at(-2).scores[s.player] : s.history[0]?.scores[s.player] ?? sc;
+  const d = sc - prev;
+  h += `<div class="sb-score" title="Score ${sc.toFixed(0)} · started ${th.start} · victory ≥ ${th.victory} · defeat below ${th.draw}">
+    <span class="n">${sc.toFixed(0)}</span><span class="d ${d > 0.5 ? 'up' : d < -0.5 ? 'down' : 'flat'}">${d > 0.5 ? `▲${d.toFixed(0)}` : d < -0.5 ? `▼${Math.abs(d).toFixed(0)}` : '—'}</span>
+    <div class="gauge"><i class="fill ${sc >= th.victory ? 'win' : sc < th.draw ? 'lose' : ''}" style="width:${Math.max(0, Math.min(100, sc))}%"></i><i class="tick start" style="left:${th.start}%" title="Start ${th.start}"></i><i class="tick win" style="left:${th.victory}%" title="Victory ${th.victory}"></i></div></div>`;
+  h += `<div class="sb-res"><span title="Treasury">${icon('coin')}${Math.floor(a.money)}</span><span title="Military">${icon('shield')}${Math.floor(a.military)}</span><span title="Political capital">${icon('people')}${Math.floor(a.political)}</span><span title="Stability">${icon('flag')}${Math.floor(a.stability)}</span></div>`;
+  return h;
+}
+
+// ── theater popover on the map: what is here, what happened here, cards dealt here ──
+export function theaterPopHtml(s, tid, happenings = []) {
+  const t = s.theaters[tid], def = THEATER_BY_ID[tid];
+  const infl = Object.entries(t.infl).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const cards = s.situations.filter((x) => x.at === tid);
+  let h = `<div class="pop-head"><b>${esc(def.name)}</b><span class="muted small">tension ${Math.round(t.tension)}</span><button class="x" data-act="closePop" title="Close">×</button></div>`;
+  h += `<div class="pop-infl">${infl.map(([id, v]) => `<span title="${esc(ACTOR_BY_ID[id].name)} ${Math.round(v)}">${dot(id)}<i class="bar"><b style="width:${v}%;background:${ACTOR_BY_ID[id].color}"></b></i></span>`).join('')}</div>`;
+  if (cards.length) h += `<div class="pop-cards">${cards.map((c) => `<button data-act="gotoCard" data-id="${esc(c.id)}" class="${c.kind}">${icon(KIND_ICON[c.kind])}<span>${esc(c.title)}</span></button>`).join('')}</div>`;
+  if (happenings.length) {
+    h += `<div class="pop-hap">${happenings.slice(0, 6).map((x) => `<div class="hrow ${x.cls}"><span class="oic">${icon(x.icon)}</span><div class="bbody">${x.actor ? dot(x.actor) : ''}<span class="small">${esc(x.text)}</span>${chips(x.lines)}</div></div>`).join('')}${happenings.length > 6 ? `<div class="small muted">+${happenings.length - 6} more in the log</div>` : ''}</div>`;
+  } else h += `<div class="small muted pop-empty">Quiet this fortnight.</div>`;
+  h += `<div class="pop-foot"><button class="ghost small" data-act="intel" data-id="${esc(tid)}">${icon('eye')} Theater intel</button></div>`;
+  return h;
+}

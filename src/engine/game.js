@@ -38,7 +38,8 @@ export function newGame(opts = {}) {
 // ── turn start ──
 export function beginTurn(s, first = false) {
   if (!first) s.turn += 1;
-  s.declared = {}; s.argUsed = {}; s.orders = { initiative: null }; s.results = []; s.news = [];
+  // results/news keep last turn's record for the map and briefing; endTurn clears them before resolving.
+  s.declared = {}; s.argUsed = {}; s.orders = { initiative: null };
   for (const id of alive(s)) {
     if (id === s.player) continue;
     const c = chooseAction(s, id);

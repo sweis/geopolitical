@@ -96,6 +96,8 @@ const state = (page) => page.evaluate(() => game.getState());
   const pv = await page.evaluate(() => game.preview('strike', 'hormuz', 1));
   ok(pv.p >= 0.05 && pv.p <= 0.95 && pv.band && !/\d/.test(await page.locator('.box.init .odds').innerText()), `odds shown as words only ("${pv.band}")`);
   ok(s.orders.total.money > 0, `orders total computed ($${s.orders.total.money}, ${s.orders.total.military} mil, ${s.orders.total.political} PC)`);
+  ok(await page.locator('#clock .sb-score .gauge .tick.win').count() === 1 && await page.locator('#clock .sb-turn .tl i.now').count() === 1, 'status bar: score gauge with victory tick and turn timeline');
+  await page.evaluate(() => { document.querySelector('#panel').scrollTop = 400; });
   await frameStats(page, OUT + 'turn.png');
   await click(page, '[data-act="endTurn"]');
   await page.waitForFunction(() => game.getState().turn === 2, null, { timeout: 15000 });
@@ -111,6 +113,17 @@ const state = (page) => page.evaluate(() => game.getState());
   await click(page, '[data-act="continue"]');
   s = await state(page);
   ok(!s.ui.modalOpen && s.situations.length >= 1, `continued to turn 2 with ${s.situations.length} new cards: ${s.situations.map((x) => x.id).join(', ')}`);
+  const scrolls = await page.evaluate(() => ({ win: window.scrollY, main: document.querySelector('#main').scrollTop, panel: document.querySelector('#panel').scrollTop }));
+  ok(scrolls.win === 0 && scrolls.main === 0 && scrolls.panel === 0, `scrolled to the top after the turn ${JSON.stringify(scrolls)}`);
+  const glyphs = await page.locator('#map .hg').count(), arcs = await page.locator('#map .arc').count();
+  ok(glyphs >= 5 && arcs >= 5, `map shows last turn: ${glyphs} happening glyphs, ${arcs} arcs`);
+  const busy = await page.evaluate(() => { const g = document.querySelector('#map .th .hap .hg'); return g?.closest('.th')?.dataset.id ?? null; });
+  await click(page, `#map .th[data-id="${busy}"] .core`);
+  const pop = page.locator('#mapPop');
+  ok(await pop.isVisible() && (await pop.locator('.hrow').count()) >= 1, `clicking ${busy} opens a popover with ${await pop.locator('.hrow').count()} happening rows`);
+  await frameStats(page, OUT + 'popover.png');
+  await click(page, '#mapPop [data-act="closePop"]');
+  ok(!(await pop.isVisible()), 'popover closes');
   ok(page.errors.length === 0, `play path: no console errors ${JSON.stringify(page.errors)}`);
 
   // 4. Stills sweep: every actor in the registry, every named camera.

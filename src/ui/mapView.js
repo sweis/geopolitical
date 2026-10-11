@@ -104,6 +104,7 @@ export function createMap(svg, { onTheaterClick, onTheaterHover }) {
     const ring = el('circle', { r: 15, class: 'ring', fill: 'none' }, g);
     const core = el('circle', { r: 6, class: 'core' }, g);
     const badge = el('text', { x: 0, y: -13, class: 'badge', 'text-anchor': 'middle' }, g);
+    const hap = el('g', { class: 'hap' }, g);
     const lbl = el('text', { x: 10, y: 4, class: 'lbl' }, g);
     lbl.textContent = t.label ?? t.name;
     if (['tehran', 'baghdad', 'redSea', 'israelHome', 'neSyria'].includes(t.id)) {
@@ -117,7 +118,7 @@ export function createMap(svg, { onTheaterClick, onTheaterHover }) {
     g.addEventListener('mouseenter', (e) => onTheaterHover?.(t.id, e));
     g.addEventListener('mousemove', (e) => onTheaterHover?.(t.id, e));
     g.addEventListener('mouseleave', () => onTheaterHover?.(null));
-    nodes[t.id] = { g, halo, ring, core, badge };
+    nodes[t.id] = { g, halo, ring, core, badge, hap };
   }
 
   const view = { svg, pos, anchors: A, nodes, arcs, fx, cam: 'overview', homeCountry: null };
@@ -145,6 +146,14 @@ export function createMap(svg, { onTheaterClick, onTheaterHover }) {
     svg.setAttribute('viewBox', `${p[0] - 150} ${p[1] - 115} 300 230`);
     view.cam = `teleport:${typeof spot === 'string' ? spot : p.join(',')}`;
     return true;
+  };
+
+  // Screen position of a theater marker relative to the map container (for anchoring popovers).
+  view.screenPos = (id) => {
+    const n = view.nodes[id];
+    if (!n) return null;
+    const r = n.core.getBoundingClientRect(), w = svg.parentElement.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - w.left, y: r.top + r.height / 2 - w.top, box: { w: w.width, h: w.height } };
   };
 
   view.highlightHome = (playerId) => {
@@ -199,3 +208,24 @@ export function flash(view, theaterId) {
 }
 
 export function theaterName(id) { return THEATER_BY_ID[id]?.name ?? id; }
+
+// Glyph clusters on the theaters where things happened last turn. items: { theaterId: [{ icon, cls }] }.
+export function drawHappenings(view, byTheater) {
+  for (const n of Object.values(view.nodes)) n.hap.innerHTML = '';
+  for (const [t, items] of Object.entries(byTheater)) {
+    const n = view.nodes[t];
+    if (!n || !items.length) continue;
+    const shown = items.slice(0, 4);
+    shown.forEach((it, i) => {
+      const g = el('g', { class: `hg ${it.cls}`, transform: `translate(${14 + i * 17} -17)` }, n.hap);
+      el('circle', { r: 8 }, g);
+      el('use', { href: `#i-${it.icon}`, x: -5.5, y: -5.5, width: 11, height: 11 }, g);
+    });
+    if (items.length > shown.length) {
+      const g = el('g', { class: 'hg more', transform: `translate(${14 + shown.length * 17} -17)` }, n.hap);
+      el('circle', { r: 8 }, g);
+      const t2 = el('text', { 'text-anchor': 'middle', y: 3.5 }, g);
+      t2.textContent = `+${items.length - shown.length}`;
+    }
+  }
+}
