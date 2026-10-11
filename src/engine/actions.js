@@ -50,7 +50,7 @@ export const ACTIONS = [
       switch (t) {
         case 'nuclearSites': W(s, 'iranNuclear', -Math.max(2, 0.16 * s.world.iranNuclear) * m); res(s, 'iran', { stability: -3 }); W(s, 'warIntensity', 8); break;
         case 'tehran': res(s, 'iran', { stability: -8 * m, military: -4 }); W(s, 'warIntensity', 12); break;
-        case 'hormuz': W(s, 'hormuz', 6 * m); W(s, 'warIntensity', 6); break;
+        case 'hormuz': infl(s, 'hormuz', 'iran', -6 * m); W(s, 'hormuz', 2 * m); W(s, 'warIntensity', 6); break;
         case 'israelHome': res(s, 'israel', { stability: -5 * m }); W(s, 'warIntensity', 6); break;
         case 'gulfBases': res(s, 'us', { military: -4 * m }); W(s, 'usWarSupport', -3); W(s, 'hormuz', -5); W(s, 'warIntensity', 8); break;
         case 'riyadh': res(s, 'saudi', { stability: -6 * m }); W(s, 'yemenWar', 8); W(s, 'oilAdj', 3); break;
@@ -72,7 +72,7 @@ export const ACTIONS = [
   {
     id: 'massiveBombing', name: 'Massive bombing campaign', cat: 'military', target: 'theater',
     who: ['us'], cost: { money: 15, military: 14, political: 3 }, base: 0.65,
-    desc: 'Resume major combat operations against Iran: B-2s, carrier wings and Tomahawks. Big effects, big domestic cost.',
+    desc: 'Resume major combat operations against Iran: B-2s, carrier wings and Tomahawks. Degrades what it hits; shipping and the program recover over time.',
     targets: () => ['tehran', 'nuclearSites', 'hormuz'],
     mods: (s) => [
       ...mod(s.world.usWarSupport < 35, 'Congress and the public are souring on the war', -0.1),
@@ -82,8 +82,8 @@ export const ACTIONS = [
     success: (s, a, t, m) => {
       res(s, 'iran', { military: -12 * m, stability: -10 * m });
       W(s, 'warIntensity', 20); W(s, 'usWarSupport', -5); W(s, 'oilAdj', 4);
-      if (t === 'nuclearSites') W(s, 'iranNuclear', -25 * m);
-      if (t === 'hormuz') { W(s, 'hormuz', 22 * m); infl(s, 'hormuz', 'iran', -20 * m); infl(s, 'hormuz', 'us', 10); }
+      if (t === 'nuclearSites') W(s, 'iranNuclear', -Math.max(6, 0.3 * s.world.iranNuclear) * m);
+      if (t === 'hormuz') { W(s, 'hormuz', 6 * m); infl(s, 'hormuz', 'iran', -18 * m); infl(s, 'hormuz', 'us', 8); }
       if (t === 'tehran') { res(s, 'iran', { stability: -6 * m, political: -2 }); }
       tension(s, t, 20);
     },

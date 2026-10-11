@@ -13,7 +13,7 @@ export const ACTORS = [
   {
     id: 'us', name: 'United States', short: 'USA', color: '#4f8fe8', kind: 'superpower',
     leader: 'President Trump', home: 'gulfBases',
-    start: { money: 120, military: 95, political: 8, stability: 62 }, income: { money: 14, military: 5, political: 3 },
+    start: { money: 100, military: 95, political: 8, stability: 62 }, income: { money: 11, military: 5, political: 3 },
     blurb: 'Seven months into a war it expected to win in weeks. Hormuz is still choked, Brent is over $100 and the midterms are three weeks out. Washington wants Iran disarmed and the oil flowing, without a quagmire.',
     goals: [
       atLeast('Reopen the Strait of Hormuz', W('hormuz'), 80, 20, 3, '%'),

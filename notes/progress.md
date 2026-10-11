@@ -40,6 +40,30 @@ Less prose, more signal: every option/proposal/result has an icon (`src/ui/icons
 - After End turn and after Continue, every scroll container (page, main grid, panel, modal) returns to the top.
 - Bug fixed on the way: `beginTurn` cleared `results`/`news` before the map drew them, so arcs had been empty since the flow rewrite.
 
+### Consequences of force (session 3)
+Playtest finding: an all-force US nearly won. Added systemic costs that every actor pays (`src/engine/consequences.js`, hooked into `applyOutcome`, so the AI's lookahead sees them too):
+- **Legitimacy**: using force costs regard with every third party not hostile to the victim, scaled by the target (civilian-dense and capital targets, massive bombing, assassinations cost most; EU, Turkey, Egypt object loudest; allies discount 40%).
+- **Rally round the flag**: a standing regime whose capital is bombed gains a little stability.
+- **Home front**: every American sortie costs war support; war support below 40 erodes US stability faster (÷15); below 25 US diplomacy negotiates "from visible weakness".
+- **Fatigue**: consecutive turns of force (tracked per actor in `s.fatigue`) lower the odds of further force (−5%/turn, cap −20%) and cause attrition; forces regenerate at most +3/turn.
+- **Escalation grind** (upkeep, war intensity ≥ 60, doubled ≥ 80): US support, fleet and money drain; Gulf, Israel, Iran and EU stability erode; oil adj rises; the Axis mobilizes (+military); ISIS grows; and **Iran reconstitutes** its program (+1–2 breakout/turn while its regime stands). Deployments cost the US money while intensity ≥ 50.
+- **Shipping cannot be bombed open**: strikes on Hormuz degrade IRGC coastal influence (raising the traffic cap) but traffic itself recovers only +4/turn, and the cap is reduced up to 45% while the war is hot. Massive bombing of the nuclear complex now removes 30% of the remaining program (min 6), not a flat 25.
+- **Bluster**: options matching demand/defy/double down/unconditional/ultimatum/blame/… set a flag; the actor's diplomatic odds are −10% for two turns ("Recent threats poisoned the channel").
+- **AI**: a bombed Iran leans toward the dash (lesson of Libya); partners of a struck actor lean toward hitting the attacker (solidarity); grudges unchanged.
+- US treasury 100 (was 120), income 11 (was 14).
+
+`node tests/policies.mjs 5` (fixed policies over 5 seeds; mean score, W/D/L):
+| seat | force | talk | balanced AI |
+|---|---|---|---|
+| US before | 60 (0/5/0) | 65 | 70 |
+| US after | **54 (0/1/4)**, support 1, stability 8 | 71 (1/3/1) | 75 (2/3/0) |
+| Israel after | 35 (0/2/3) | 35 (0/4/1) | 48 (0/5/0) |
+| Iran after | 72 (1/3/1), Brent $120 | 80 | 82 (1/4/0) |
+AI-seat verdict sweep after: 15 W / 40 D / 2 L.
+
+### Map: top-3 strip (session 3)
+Arcs retired (too small to read). After each turn the three most consequential happenings (ranked by score impact, chip weight, whether it was yours and moved anything, decisive/backfired) show as large cards along the bottom of the map with numbered pins (1 amber) on their theaters; clicking a card opens that theater's popover; "+N more" opens the briefing. Glyph clusters on the other theaters remain for drill-down.
+
 ### Dev hooks (`?dev=1`)
 `window.game`: `getState()`, `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`.
 Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader counts are null.

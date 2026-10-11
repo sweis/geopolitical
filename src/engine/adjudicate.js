@@ -4,6 +4,7 @@ import { ACTION_BY_ID, COMMIT, costOf, targetName } from './actions.js';
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { res, deriveWorld } from './state.js';
 import { d100 } from './rng.js';
+import { applyConsequences, systemicMods } from './consequences.js';
 
 export const P_MIN = 0.05, P_MAX = 0.95, DEBATE_CAP = 0.25;
 
@@ -16,7 +17,7 @@ export const clampP = (p) => Math.max(P_MIN, Math.min(P_MAX, p));
 
 export function evaluate(s, a, actionId, target, commit = 0, args = []) {
   const act = ACTION_BY_ID[actionId];
-  const mods = act.mods(s, a, target);
+  const mods = [...act.mods(s, a, target), ...systemicMods(s, a, actionId)];
   const modSum = mods.reduce((n, m) => n + m.d, 0);
   const commitBonus = COMMIT[commit].bonus;
   let debate = args.reduce((n, x) => n + x.d, 0);
@@ -38,6 +39,7 @@ export function applyOutcome(s, a, actionId, target, outcome) {
   else if (outcome === 'success') act.success(s, a, target, 1);
   else if (outcome === 'blowback') act.fail(s, a, target, 1.5);
   else act.fail(s, a, target, 1);
+  applyConsequences(s, a, actionId, target, outcome);
   deriveWorld(s);
 }
 

@@ -46,7 +46,18 @@ export function grudges(s, a) {
 }
 function grudgeBonus(s, a, c) {
   const act = ACTION_BY_ID[c.action];
+  // Lesson of Libya: a regime whose nuclear sites were just bombed is likelier to dash for the bomb.
+  if (a === 'iran' && c.action === 'nuclearDash' && hitBy(s, a, 1).some((r) => r.target === 'nuclearSites' || r.target === 'tehran')) return 3;
   if (act.cat !== 'military' && act.cat !== 'covert') return 0;
+  // Solidarity: partners of a struck actor (relations >= 60) lean toward hitting the attacker too.
+  for (const id of Object.keys(s.actors)) {
+    if (id === a || rel(s, a, id) < 60) continue;
+    for (const g of grudges(s, id)) {
+      if (g === a) continue;
+      const t = s.theaters[c.target];
+      if (c.target === g || (t && (homeOf(g) === c.target || (t.infl[g] || 0) >= 30))) return GRUDGE_BONUS * 0.6;
+    }
+  }
   for (const g of grudges(s, a)) {
     if (c.target === g) return GRUDGE_BONUS;
     const t = s.theaters[c.target];

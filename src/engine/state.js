@@ -22,7 +22,7 @@ export function createState({ seed = 1, player = null, maxTurns = MAX_TURNS } = 
     declared: {}, argUsed: {}, situations: [], orders: { initiative: null },
     // What happened: this turn's results and events, the relevance-filtered briefing, and a short
     // structured memory of recent results that situations and AI grudges read.
-    results: [], news: [], briefing: null, recent: [], cool: {},
+    results: [], news: [], briefing: null, recent: [], cool: {}, fatigue: {},
     log: [], history: [], flags: {},
     outcome: null,
   };

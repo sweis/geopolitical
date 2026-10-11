@@ -11,6 +11,7 @@ import { ACTION_BY_ID, affordable, canUse, ACTIONS } from './actions.js';
 import { createState, clamp, deriveWorld, W, res, alive, dateOf, infl, homeOf, rel } from './state.js';
 import { resolve as resolveDecl, evaluate, band, payCost } from './adjudicate.js';
 import { chooseAction, aiArguments, planArgs } from './ai.js';
+import { FORCE } from './consequences.js';
 import { goalScore, goalReport } from './goals.js';
 import { generateSituations, resolveSituations, compileBriefing, snapshotFor, impactSince, chooseOptionAI, proposals, ordersTotal } from './director.js';
 import { rand } from './rng.js';
@@ -130,6 +131,10 @@ export function endTurn(s) {
     s.recent.push({ turn: s.turn, kind: 'action', actor: d.actor, action: d.action, target: d.target, ok: r.ok, outcome: r.outcome, text: r.text });
     log(s, r.ok ? 'success' : 'fail', r.text, { actor: d.actor, p: r.p, roll: r.roll });
   }
+  // Fatigue: consecutive turns in which an actor used force.
+  const used = new Set(s.results.filter((r) => FORCE.has(r.action) && r.outcome !== 'fizzle').map((r) => r.actor));
+  for (const r of mine) if (r.kind === 'situation' && r.action && FORCE.has(r.action)) used.add(p);
+  for (const id of Object.keys(s.actors)) s.fatigue[id] = used.has(id) ? (s.fatigue[id] || 0) + 1 : Math.max(0, (s.fatigue[id] || 0) - 1);
   // 4. Upkeep, events, collapse, end checks.
   upkeep(s);
   checkEnd(s);
@@ -159,8 +164,8 @@ function upkeep(s) {
     const a = s.actors[def.id];
     if (a.collapsed) continue;
     a.money = Math.round((a.money + def.income.money * (0.5 + a.stability / 200)) * 10) / 10;
-    // Forces regenerate toward their starting strength; growth beyond it takes deliberate action.
-    if (a.military < def.start.military) a.military = Math.min(def.start.military, a.military + def.income.military);
+    // Forces regenerate slowly toward their starting strength (munitions, crews, repairs); growth beyond it takes deliberate action.
+    if (a.military < def.start.military) a.military = Math.min(def.start.military, a.military + Math.min(def.income.military, 3));
     a.political = Math.min(20, a.political + def.income.political);
     if (def.kind === 'nonstate' && a.stability < 30) a.stability += 1; // insurgent resilience
     if (a.stability > 50) a.stability -= a.stability > 70 ? 2 : 1; // cohesion erodes without upkeep
@@ -172,10 +177,12 @@ function upkeep(s) {
   if (w.hormuz < 40) { res(s, 'saudi', { money: -2 }); res(s, 'china', { stability: -1 }); }
   if (w.redSea < 40) { res(s, 'egypt', { money: -2, stability: -1 }); }
   if (w.iranSanctions >= 80 && w.warIntensity >= 50) res(s, 'iran', { stability: -1 });
-  // Chokepoints: while the war is hot, whoever holds the coast caps traffic. Escorts can push
-  // traffic up to the cap; above it, traffic bleeds back. Degrade the coastal force or end the war.
-  const capH = w.warIntensity >= 40 ? 100 - 0.8 * (s.theaters.hormuz.infl.iran || 0) : 100;
-  if (w.hormuz > capH) W(s, 'hormuz', -Math.min(6, w.hormuz - capH));
+  // Chokepoints: whoever holds the coast caps traffic, and so does a hot war (insurers and shipowners stay
+  // away whatever the navies do). Traffic bleeds back above the cap and recovers slowly below it.
+  const warFactor = w.warIntensity >= 40 ? 1 - Math.min(0.45, (w.warIntensity - 40) / 130) : 1;
+  const capH = (w.warIntensity >= 40 ? 100 - 0.8 * (s.theaters.hormuz.infl.iran || 0) : 100) * warFactor;
+  if (w.hormuz > capH) W(s, 'hormuz', -Math.min(8, w.hormuz - capH));
+  else if (w.hormuz < capH - 2) W(s, 'hormuz', Math.min(4, capH - w.hormuz));
   const capR = w.yemenWar >= 30 || w.gazaCeasefire < 50 ? 100 - 0.8 * (s.theaters.babElMandeb.infl.houthis || 0) : 100;
   if (w.redSea > capR) W(s, 'redSea', -Math.min(6, w.redSea - capR));
   s.flags.capHormuz = Math.round(capH); s.flags.capRedSea = Math.round(capR);
@@ -191,6 +198,17 @@ function upkeep(s) {
   if (s.actors.hezbollah.military >= 35 && !s.actors.hezbollah.collapsed) W(s, 'hezbollahDisarm', -1);
   if (w.westBankAnnex >= 35 || w.humanitarian < 35) W(s, 'normalization', -1);
   if (s.actors.iran.stability >= 40 && w.iranSanctions < 70 && !s.actors.iran.collapsed) W(s, 'iranNuclear', 1);
+  // Under bombardment a standing regime disperses and reconstitutes: the knowledge cannot be bombed.
+  if (w.warIntensity >= 60 && s.actors.iran.stability >= 30 && !s.actors.iran.collapsed) W(s, 'iranNuclear', w.warIntensity >= 80 ? 2 : 1);
+  // Escalation grinds everyone in the war: the home front, the fleet, the Gulf, the markets; the Axis mobilizes.
+  if (w.warIntensity >= 60) {
+    const k = w.warIntensity >= 80 ? 2 : 1;
+    W(s, 'usWarSupport', -2 * k); res(s, 'us', { military: -2 * k, money: -3 * k });
+    W(s, 'oilAdj', k); res(s, 'saudi', { stability: -k }); res(s, 'israel', { stability: -k, money: -2 * k }); res(s, 'iran', { stability: -k, money: -2 * k }); res(s, 'eu', { stability: -1 });
+    for (const g of ['hezbollah', 'houthis', 'iraqMilitias']) if (!s.actors[g].collapsed) res(s, g, { military: k });
+    W(s, 'isisStrength', 1);
+  }
+  if (w.warIntensity >= 50) res(s, 'us', { money: -Math.round((w.warIntensity - 40) / 8) }); // deployments cost
   if (s.actors.houthis.military >= 35 && rel(s, 'houthis', 'saudi') < 0 && !s.actors.houthis.collapsed) W(s, 'yemenWar', 2);
   if (s.actors.isis.military >= 18 && !s.actors.isis.collapsed) W(s, 'isisStrength', 1);
   if (w.kurdishAutonomy > 50 && s.actors.turkey.military >= 50) W(s, 'kurdishAutonomy', -1);
@@ -198,7 +216,7 @@ function upkeep(s) {
   W(s, 'warIntensity', -1); W(s, 'yemenWar', -1);
   if (w.oilAdj > 0) W(s, 'oilAdj', -1); else if (w.oilAdj < 0) W(s, 'oilAdj', 1);
   W(s, 'usWarSupport', w.warIntensity >= 50 ? -1 : 1);
-  res(s, 'us', { stability: (w.usWarSupport - 40) / 20 });
+  res(s, 'us', { stability: (w.usWarSupport - 40) / 15 });
   if (w.hezbollahDisarm >= 50) res(s, 'lebanon', { stability: 1 });
   for (const t of Object.values(s.theaters)) t.tension = t.tension > 20 ? t.tension - 3 : t.tension;
   deriveWorld(s);

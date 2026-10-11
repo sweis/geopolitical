@@ -4,9 +4,11 @@ import { ACTION_BY_ID } from './engine/actions.js';
 import { newGame, choose, setInitiative, clearInitiative, endTurn, autoTurn, proposals } from './engine/game.js';
 import { impactLine } from './engine/director.js';
 import { rel } from './engine/state.js';
-import { createMap, renderMap, drawArcs, drawHappenings, flash } from './ui/mapView.js';
+import { createMap, renderMap, drawArcs, drawHappenings, drawPins, flash } from './ui/mapView.js';
 import * as P from './ui/panels.js';
 import { iconSheet, actionIcon, optionIcon } from './ui/icons.js';
+import { THEATER_BY_ID } from './data/theaters.js';
+const short = (id) => ACTOR_BY_ID[id]?.short ?? THEATER_BY_ID[id]?.label ?? THEATER_BY_ID[id]?.name ?? id;
 import { installDev } from './dev/dev.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -14,7 +16,7 @@ const params = new URLSearchParams(location.search);
 
 export const app = {
   s: null,
-  ui: { tab: 'command', cat: 'all', action: null, target: undefined, commit: 0, selectedTheater: null, targetable: new Set(), startPick: 'us', showAll: false, why: new Set(), expanded: new Set(), proposals: null, overlay: null, pop: null, hap: {} },
+  ui: { tab: 'command', cat: 'all', action: null, target: undefined, commit: 0, selectedTheater: null, targetable: new Set(), startPick: 'us', showAll: false, why: new Set(), expanded: new Set(), proposals: null, overlay: null, pop: null, hap: {}, top: [] },
   metrics: { lastTurnMs: 0, renders: 0 },
   errors: [],
   map: null,
@@ -35,10 +37,12 @@ export function startGame(player, seed = +(params.get('seed') ?? Date.now() % 10
   resetTurnUi();
   app.ui.tab = 'command';
   app.ui.overlay = null;
-  app.ui.hap = {};
+  app.ui.hap = {}; app.ui.top = [];
   app.map.highlightHome(player);
   drawArcs(app.map, [], player);
   drawHappenings(app.map, {});
+  drawPins(app.map, []);
+  renderStrip();
   closeModal();
   closePop();
   render();
@@ -69,6 +73,7 @@ export function render() {
   const latest = s.news.at(-1)?.text ?? s.log.at(-1)?.text ?? '';
   $('#tickerText').textContent = latest;
   if (ui.pop) renderPop();
+  if (!$('#mapTop')) renderStrip();
 }
 
 function openModal(html) { const m = $('#modal'); m.innerHTML = html; m.hidden = false; m.scrollTop = 0; }
@@ -84,7 +89,7 @@ function buildHappenings() {
   const relevant = new Set((s.briefing?.affecting ?? []).map((r) => r.actor));
   const hostile = (id) => p && id !== p && rel(s, p, id) <= -40;
   for (const r of s.briefing?.mine ?? []) {
-    if (r.kind === 'situation' && r.at) add(r.at, { icon: optionIcon({ id: r.option, label: r.label }), cls: r.ok ? 'mine' : 'mine bad', actor: null, text: `${r.label}: ${r.text}`, lines: r.lines, w: 3 });
+    if (r.kind === 'situation' && r.at) add(r.at, { icon: optionIcon({ id: r.option, label: r.label }), cls: r.ok ? 'mine' : 'mine bad', actor: null, text: `${r.label}: ${r.text}`, lines: r.lines, w: 3, title: r.label, score: Math.abs(r.impact?.dScore ?? 0), big: r.outcome === 'crit' || r.outcome === 'blowback' });
   }
   for (const r of s.results) {
     const t = s.theaters[r.target] ? r.target : (ACTOR_BY_ID[r.target]?.home ?? ACTOR_BY_ID[r.actor]?.home);
@@ -94,21 +99,50 @@ function buildHappenings() {
     const good = lines.some((l) => l.good > 0) && !lines.some((l) => l.good < 0);
     const bad = lines.some((l) => l.good < 0);
     const cls = mine ? (r.ok ? 'mine' : 'mine bad') : relevant.has(r.actor) ? (bad ? 'bad' : good ? 'good' : 'rel') : 'faint';
-    add(t, { icon: actionIcon(r.action), cls, actor: r.actor, text: r.text, lines, w: mine ? 3 : relevant.has(r.actor) ? 2 : hostile(r.actor) ? 1.5 : 1 });
+    add(t, { icon: actionIcon(r.action), cls, actor: r.actor, text: r.text, lines, w: mine ? 3 : relevant.has(r.actor) ? 2 : hostile(r.actor) ? 1.5 : 1, title: `${ACTION_BY_ID[r.action]?.name ?? r.action}${r.target ? ` · ${P.esc(short(r.target))}` : ''}`, score: Math.abs(r.impact?.dScore ?? 0), big: r.outcome === 'crit' || r.outcome === 'blowback' });
   }
   for (const n of s.news) {
     const lines = p && n.impact ? impactLine(s, p, n.impact) : [];
-    add(n.at, { icon: 'bolt', cls: lines.length ? 'event' : 'faint', actor: null, text: n.text, lines, w: lines.length ? 2.5 : 1 });
+    add(n.at, { icon: 'bolt', cls: lines.length ? 'event' : 'faint', actor: null, text: n.text, lines, w: lines.length ? 2.5 : 1, title: n.text.length > 60 ? n.text.slice(0, 57).replace(/\s+\S*$/, '') + '…' : n.text, score: Math.abs(n.impact?.dScore ?? 0), big: false });
   }
   for (const list of Object.values(by)) list.sort((a, b) => b.w - a.w);
   return by;
 }
 
+// The three happenings that mattered most: by score impact, chip weight, and whether it was yours.
+function buildTop(hap) {
+  const all = [];
+  for (const [theater, items] of Object.entries(hap)) for (const x of items) all.push({ ...x, theater });
+  for (const x of all) {
+    const moved = (x.score ?? 0) > 0 || (x.lines ?? []).length > 0;
+    x.rankW = 4 * (x.score ?? 0) + 0.25 * (x.lines ?? []).reduce((n, l) => n + Math.abs(l.d), 0) + (x.cls.startsWith('mine') && moved ? 2 : 0) + (x.cls === 'faint' ? -1 : 0.5) + (x.big ? 1 : 0);
+  }
+  all.sort((a, b) => b.rankW - a.rankW);
+  return { top: all.slice(0, 3).map((x, i) => ({ ...x, rank: i + 1 })), more: Math.max(0, all.length - 3) };
+}
+
+function renderStrip() {
+  let e = $('#mapTop');
+  if (!e) { e = document.createElement('div'); e.id = 'mapTop'; $('#mapwrap').appendChild(e); e.addEventListener('click', onStripClick); }
+  const { top, more } = app.ui.top.length ? app.ui.top[0] : { top: [], more: 0 };
+  e.innerHTML = P.topStripHtml(top, more);
+  e.hidden = !top.length;
+}
+function onStripClick(e) {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  if (b.dataset.act === 'top') { if (b.dataset.id) openPop(b.dataset.id); else showBriefing(); }
+  if (b.dataset.act === 'briefing') showBriefing();
+}
+
 function afterTurn() {
   const s = app.s;
-  const relevant = new Set((s.briefing?.affecting ?? []).map((r) => r.actor));
-  drawArcs(app.map, s.results, s.player, relevant);
+  drawArcs(app.map, [], s.player); // arcs retired: too small to read; the strip and pins carry the turn
   app.ui.hap = buildHappenings();
+  const ranked = buildTop(app.ui.hap);
+  app.ui.top = [ranked];
+  drawPins(app.map, ranked.top.filter((x) => x.theater).map((x) => ({ theater: x.theater, rank: x.rank })));
+  renderStrip();
   drawHappenings(app.map, Object.fromEntries(Object.entries(app.ui.hap).map(([t, items]) => [t, items.filter((x) => x.cls !== 'faint').concat(items.filter((x) => x.cls === 'faint'))])));
   for (const n of s.news) if (n.at) flash(app.map, n.at);
   resetTurnUi();

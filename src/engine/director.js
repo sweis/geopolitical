@@ -16,6 +16,9 @@ import { rand } from './rng.js';
 export const DIRECTOR_ERRORS = [];
 const report = (where, id, e) => { if (DIRECTOR_ERRORS.length < 200) DIRECTOR_ERRORS.push({ where, id, message: String(e?.message ?? e) }); };
 
+// Loud demands and threats poison later diplomacy for a couple of turns (see consequences.systemicMods).
+const BLUSTER = /demand|defy|double down|unconditional|ultimatum|threat|reject publicly|refuse publicly|blame|claim the mandate|around the white house|send the gulf the bill|crush|humble/i;
+
 export const MAX_CARDS = 2;          // crisis/opportunity cards per turn (an intel card may be added)
 export const INTEL_THRESHOLD = 1.5;  // utility stake needed before an AI move earns an intel card
 const DEFAULT_COOLDOWN = 3;
@@ -247,6 +250,7 @@ export function resolveSituations(s) {
     const m = outcome === 'crit' || outcome === 'blowback' ? 1.5 : 1;
     try { if (ok) o.success(h, m); else o.fail(h, m); } catch (e) { report(ok ? 'success' : 'fail', `${sit.id}/${mat.id}`, e); }
     if (o.sets) for (const [k, v] of Object.entries(o.sets)) s.flags[k] = v;
+    if (BLUSTER.test(`${mat.id} ${mat.label}`)) { s.flags.bluster = s.turn; s.flags.blusterBy = p; }
     deriveWorld(s);
     let text = (ok ? o.say?.success : o.say?.fail) || (ok ? `${mat.label}: it worked.` : `${mat.label}: it failed.`);
     if (outcome === 'crit') text += ' Better than anyone expected.';

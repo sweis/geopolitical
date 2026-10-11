@@ -105,6 +105,7 @@ export function createMap(svg, { onTheaterClick, onTheaterHover }) {
     const core = el('circle', { r: 6, class: 'core' }, g);
     const badge = el('text', { x: 0, y: -13, class: 'badge', 'text-anchor': 'middle' }, g);
     const hap = el('g', { class: 'hap' }, g);
+    const pin = el('g', { class: 'pin', transform: 'translate(-17 -16)' }, g);
     const lbl = el('text', { x: 10, y: 4, class: 'lbl' }, g);
     lbl.textContent = t.label ?? t.name;
     if (['tehran', 'baghdad', 'redSea', 'israelHome', 'neSyria'].includes(t.id)) {
@@ -118,7 +119,7 @@ export function createMap(svg, { onTheaterClick, onTheaterHover }) {
     g.addEventListener('mouseenter', (e) => onTheaterHover?.(t.id, e));
     g.addEventListener('mousemove', (e) => onTheaterHover?.(t.id, e));
     g.addEventListener('mouseleave', () => onTheaterHover?.(null));
-    nodes[t.id] = { g, halo, ring, core, badge, hap };
+    nodes[t.id] = { g, halo, ring, core, badge, hap, pin };
   }
 
   const view = { svg, pos, anchors: A, nodes, arcs, fx, cam: 'overview', homeCountry: null };
@@ -227,5 +228,18 @@ export function drawHappenings(view, byTheater) {
       const t2 = el('text', { 'text-anchor': 'middle', y: 3.5 }, g);
       t2.textContent = `+${items.length - shown.length}`;
     }
+  }
+}
+
+// Numbered pins marking the top consequential happenings. pins: [{ theater, rank }].
+export function drawPins(view, pins) {
+  for (const n of Object.values(view.nodes)) n.pin.innerHTML = '';
+  for (const { theater, rank } of pins) {
+    const n = view.nodes[theater];
+    if (!n || n.pin.childNodes.length) continue;
+    n.pin.setAttribute('class', `pin r${rank}`);
+    el('circle', { r: 9 }, n.pin);
+    const t = el('text', { 'text-anchor': 'middle', y: 3.5 }, n.pin);
+    t.textContent = String(rank);
   }
 }

@@ -330,3 +330,11 @@ export function theaterPopHtml(s, tid, happenings = []) {
   h += `<div class="pop-foot"><button class="ghost small" data-act="intel" data-id="${esc(tid)}">${icon('eye')} Theater intel</button></div>`;
   return h;
 }
+
+// ── top-3 strip over the map: the most consequential happenings of the last fortnight ──
+export function topStripHtml(items, more) {
+  if (!items.length) return '';
+  return `<div class="topstrip">${items.map((x) => `<button class="topcard ${x.cls}" data-act="top" data-id="${esc(x.theater ?? '')}" data-rank="${x.rank}" title="${esc(x.text)}">
+      <span class="rank">${x.rank}</span><span class="oic">${icon(x.icon)}</span>
+      <span class="body"><span class="t">${x.actor ? dot(x.actor) : ''}${esc(x.title)}</span>${x.theater ? `<span class="where">${esc(short(x.theater))}</span>` : ''}${chips(x.lines)}</span></button>`).join('')}${more > 0 ? `<button class="topmore" data-act="briefing" title="Everything that happened">+${more}<span>more</span></button>` : ''}</div>`;
+}

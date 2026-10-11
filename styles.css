@@ -366,3 +366,35 @@ button.more { border: 0; background: transparent; color: var(--amber); padding: 
 .hrow .bbody { min-width: 0; }
 .pop-empty { margin: 4px 0; }
 .pop-foot { margin-top: 8px; display: flex; justify-content: flex-end; }
+
+/* ── top-3 strip and pins ── */
+#mapTop { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 4; }
+#mapTop[hidden] { display: none; }
+.topstrip { display: flex; gap: 8px; align-items: stretch; }
+.topcard { flex: 1 1 0; min-width: 0; display: grid; grid-template-columns: 22px 30px 1fr; gap: 8px; align-items: start; text-align: left; padding: 8px 10px; background: rgba(13,20,27,.94); border: 1px solid var(--line2); border-radius: 10px; cursor: pointer; }
+.topcard:hover { border-color: var(--amber); }
+.topcard .rank { font-family: var(--mono); font-weight: 800; font-size: 13px; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #1c2733; color: var(--text); border: 1px solid var(--line2); }
+.topcard .oic { width: 30px; height: 30px; }
+.topcard .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.topcard .t { font-size: 12px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topcard .where { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.topcard .fx { margin-top: 2px; }
+.topcard.mine .oic, .topcard.mine .rank { color: var(--amber); border-color: var(--amber); }
+.topcard.bad .oic { color: var(--red); border-color: rgba(229,72,77,.5); }
+.topcard.good .oic { color: var(--green); border-color: rgba(70,167,88,.5); }
+.topcard.rel .oic { color: var(--blue); }
+.topcard.event .oic { color: var(--amber); }
+.topmore { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 6px 12px; background: rgba(13,20,27,.94); border: 1px solid var(--line2); border-radius: 10px; font-family: var(--mono); font-weight: 700; font-size: 14px; }
+.topmore span { font-family: var(--sans); font-size: 10px; color: var(--muted); font-weight: 500; }
+.pin circle { fill: #10171f; stroke: var(--text); stroke-width: 1.5; }
+.pin text { fill: var(--text); font-family: var(--mono); font-size: 11px; font-weight: 800; pointer-events: none; }
+.pin.r1 circle { fill: var(--amber); stroke: #1a1205; } .pin.r1 text { fill: #1a1205; }
+.pin:empty { display: none; }
+@media (max-width: 900px) {
+  #mapTop { left: 6px; right: 6px; bottom: 6px; }
+  .topstrip { gap: 5px; }
+  .topcard { grid-template-columns: 18px 1fr; padding: 6px 8px; }
+  .topcard .oic { display: none; }
+  .topcard .fx { display: none; }
+  .topmore { padding: 6px 8px; }
+}
