@@ -34,6 +34,12 @@ Victory: score ≥ max(75, start+28) at turn 16; draw if ≥ start−5; all obje
 ### Visual pass (session 2, later)
 Less prose, more signal: every option/proposal/result has an icon (`src/ui/icons.js`, inline SVG sheet injected at boot; action → icon map plus word heuristics for hand-written options), a five-pip odds meter with the band word, and **effect chips** computed by the engine (`director.effectChips`: simulate the success outcome on a clone, diff the player's tracks/resources/relations/influence, color by whether the change helps the player's objectives). Cost is icon+number. Card briefs show the first sentence with the rest behind "more"; an option's description shows only when selected. Theater markers carry a badge for the card dealt there (! crisis, ✦ opportunity, ◉ intel). The briefing uses outcome glyphs, chips and a score sparkline. Start/help screens cut to a few lines.
 
+### Map and status bar (session 2, later)
+- Status bar across the top: turn timeline (16 segments), date, score gauge (fill + start tick + victory tick, colored when above the bar or below defeat) with the turn's delta, resources, then the objective tracks on a second row.
+- Map happenings: after each turn the theaters where things happened carry glyph clusters (own moves amber, hostile-to-you red, helpful green, AI moves that touched you blue, events bolt, the rest faint; "+n" when more than four). Clicking a theater opens a popover anchored to the marker: influence bars, the cards dealt there (click jumps to the card), the happenings with effect chips, and a "Theater intel" button. Clicking the map background or × closes it; hover tooltips still work. Arcs are drawn for every resolved action (bright for own/relevant, faint otherwise).
+- After End turn and after Continue, every scroll container (page, main grid, panel, modal) returns to the top.
+- Bug fixed on the way: `beginTurn` cleared `results`/`news` before the map drew them, so arcs had been empty since the flow rewrite.
+
 ### Dev hooks (`?dev=1`)
 `window.game`: `getState()`, `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`.
 Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader counts are null.
@@ -45,6 +51,7 @@ Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader 
 - Balance (`node tests/verdicts.mjs 3`, AI plays each seat): before this session's pushback the cards made it trivial (46 W / 10 D / 1 L); after reversion, gang-up-on-the-leader and the score-only bar at 75/+28: **20 W / 35 D / 2 L**, final scores mostly 65–90. Seats that start high (Hezbollah, PIJ, Iraqi militias, Russia) need 85–93 and rarely get there; SDF is the only seat that loses outright.
 - Perf: turn compute ~100–250 ms in headless Chromium (proposals + 19 AI lookaheads + card generation + effect previews).
 - Visual pass verified by captures through the real page (turn screen, proposals/initiative, briefing) and the full suite (engine, situation probe, browser) passing afterwards.
+- Browser suite also asserts: status bar gauge and timeline present; scroll positions are 0 after a turn; ≥5 glyphs and ≥5 arcs on the map after a turn; clicking a theater with happenings opens the popover with rows and × closes it.
 
 ## Not verified
 - Human playtest of the new flow.
