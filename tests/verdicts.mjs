@@ -11,7 +11,7 @@ for (const a of ACTORS) {
     const s = newGame({ seed: 1000 + seed, player: a.id });
     while (s.phase !== 'over') autoTurn(s);
     tally[s.outcome.result]++;
-    row.push(`${s.outcome.result[0].toUpperCase()}${goalScore(a, s).toFixed(0)}`);
+    row.push(`${{ victory: 'W', draw: 'D', defeat: 'L' }[s.outcome.result]}${goalScore(a, s).toFixed(0)}`);
   }
   const th = thresholds(newGame({ seed: 1, player: a.id }), a.id);
   console.log(`${a.id.padEnd(13)} start ${th.start} need ${th.victory}/${th.metNeeded}  ${row.join(' ')}`);

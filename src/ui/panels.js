@@ -265,7 +265,7 @@ export function helpHtml() {
   <li><b>Situations.</b> The game master deals the cards that grew out of last turn: a crisis that must be answered, an opening you can take or leave, and intelligence on a rival's plan you can lobby for or against. Each option has a cost and an assessment of its odds; the reasons are a click away.</li>
   <li><b>Initiative.</b> One move of your own. Your advisers propose the moves that best serve your objectives right now; the full catalogue is there if you disagree. Other actors are expected to lobby for or against it.</li>
   <li><b>End turn.</b> Everything resolves at once. Outcomes are narrated, never rolled in front of you. The briefing shows only what mattered to you; the rest is a fold-out.</li></ol>
-  <h2>Winning</h2><p>Your score (0–100) is weighted progress on your objectives. Raise it by 15 points (minimum 60) and fully meet at least half your objectives by the last turn to win; meet every objective after turn 6 for a decisive early win; let your stability hit 0 and you collapse.</p>
+  <h2>Winning</h2><p>Your score (0–100) is weighted progress on your objectives. Raise it by 22 points (minimum 68) and fully meet at least half your objectives by the last turn to win; meet every objective after turn 6 for a decisive early win; let your stability hit 0 and you collapse.</p>
   <h2>Resources</h2><p><b>Treasury</b> and <b>military</b> pay for operations. <b>Political capital</b> pays for diplomacy and lobbying. <b>Stability</b> is your home front. The top bar shows only the tracks your objectives depend on.</p>
   <div class="btnrow"><button class="primary" data-act="closeModal">Back to the game</button></div></div>`;
 }

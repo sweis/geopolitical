@@ -7,7 +7,7 @@ import { goalScore } from './goals.js';
 import { simClone as clone } from './state.js';
 import { evaluate, payCost, applyOutcome } from './adjudicate.js';
 import { rand, pick } from './rng.js';
-import { hitBy, homeOf } from './state.js';
+import { hitBy, homeOf, rel } from './state.js';
 
 const TEMPERATURE = 0.6;
 const GRUDGE_BONUS = 2.5;
@@ -74,9 +74,22 @@ function flagBias(s, a, c) {
   return bias;
 }
 
+// Balance of threat: when the player is running away with the game, hostile actors turn on them.
+function leaderBias(s, a, c) {
+  const p = s.player;
+  if (!p || p === a || s.actors[p].collapsed) return 0;
+  const lead = goalScore(ACTOR_BY_ID[p], s) - 65;
+  if (lead <= 0 || rel(s, a, p) > -30) return 0;
+  const act = ACTION_BY_ID[c.action];
+  if (act.cat !== 'military' && act.cat !== 'covert' && act.cat !== 'economic') return 0;
+  const t = s.theaters[c.target];
+  const hits = c.target === p || (t && (homeOf(p) === c.target || (t.infl[p] || 0) >= 25));
+  return hits ? Math.min(4, lead / 6) : 0;
+}
+
 export function chooseAction(s, a) {
   const base = utility(s, a);
-  const scored = candidates(s, a).map((c) => ({ ...c, ev: expectedGain(s, a, c, base) + grudgeBonus(s, a, c) + flagBias(s, a, c) }));
+  const scored = candidates(s, a).map((c) => ({ ...c, ev: expectedGain(s, a, c, base) + grudgeBonus(s, a, c) + flagBias(s, a, c) + leaderBias(s, a, c) }));
   if (!scored.length) return null;
   scored.sort((x, y) => y.ev - x.ev);
   const top = scored.slice(0, 6);

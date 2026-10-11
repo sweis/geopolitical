@@ -164,13 +164,13 @@ export const GENERIC = [
 
   // ── Windfall for exporters ──
   {
-    id: 'g_windfall', who: 'EXPORTER', kind: 'opportunity', priority: 40, cooldown: 4,
+    id: 'g_windfall', who: 'EXPORTER', kind: 'opportunity', priority: 40, cooldown: 5,
     when: (h) => h.w.oil >= 100 && h.me.collapsed === false,
     at: (h) => h.home,
     title: (h) => `Windfall: Brent at $${h.w.oil}`,
     text: (h) => `Every barrel you can move earns a premium. ${h.p === 'iran' ? 'The dark fleet is sailing at full stretch.' : 'Washington and Beijing are both asking what you will do with it.'}`,
     options: (h) => [
-      opt({ id: 'bank', label: 'Bank it', text: 'Build reserves for the fights ahead.', cost: FREE, success: (h2) => { h2.res(h2.p, { money: 8 }); }, say: { success: 'The windfall went into reserves.' }, default: true }),
+      opt({ id: 'bank', label: 'Bank it', text: 'Build reserves for the fights ahead.', cost: FREE, success: (h2) => { h2.res(h2.p, { money: 5 }); }, say: { success: 'The windfall went into reserves.' }, default: true }),
       opt({ id: 'allies', label: 'Discount barrels for friends', text: 'Cheap crude for partners buys goodwill.', cost: FREE, success: (h2) => { for (const a of h2.allies(30).slice(0, 2)) h2.rel(h2.p, a, 6); h2.res(h2.p, { money: 3 }); }, say: { success: 'Discounted cargoes bought goodwill in friendly capitals.' } }),
       opt({ id: 'spend', label: 'Spend it at home', text: 'Subsidies and salaries while the money lasts.', cost: FREE, success: (h2) => { h2.res(h2.p, { money: 2, stability: 5 }); }, say: { success: 'Oil money flowed into salaries and subsidies.' } }),
     ],
@@ -331,10 +331,10 @@ export const GENERIC = [
     title: 'A quiet fortnight',
     text: (h) => (isState(h) ? 'No crisis demands the cabinet\'s attention this fortnight. Use the time: train the forces, shore up the home front, raise money, or work the phones.' : 'A rare quiet fortnight. Train, consolidate the base, raise money, or build political ties.'),
     options: (h) => [
-      opt({ id: 'train', label: 'Train and equip', text: 'Exercises, maintenance, new units.', cost: C(4, 0, 0), success: (h2) => { h2.res(h2.p, { military: 6 }); }, say: { success: 'Two weeks of exercises and maintenance.' } }),
-      opt({ id: 'consolidate', label: 'Shore up the home front', text: 'Patronage, services, a little theatre.', cost: C(3, 0, 0), success: (h2) => { h2.res(h2.p, { stability: 5 }); }, say: { success: 'Services and patronage bought goodwill at home.' }, default: true }),
-      opt({ id: 'raise', label: 'Raise money', text: 'Taxes, sales, donors.', cost: C(0, 0, 1), success: (h2) => { h2.res(h2.p, { money: 8 }); }, say: { success: 'The treasury grew.' } }),
-      opt({ id: 'phones', label: 'Work the phones', text: 'Visits, favours and photo opportunities.', cost: C(2, 0, 0), success: (h2) => { h2.res(h2.p, { political: 2 }); for (const a of h2.allies(30).slice(0, 2)) h2.rel(h2.p, a, 3); }, say: { success: 'A fortnight of visits and favours.' } }),
+      opt({ id: 'train', label: 'Train and equip', text: 'Exercises, maintenance, new units.', cost: C(4, 0, 0), success: (h2) => { h2.res(h2.p, { military: 4 }); }, say: { success: 'Two weeks of exercises and maintenance.' } }),
+      opt({ id: 'consolidate', label: 'Shore up the home front', text: 'Patronage, services, a little theatre.', cost: C(3, 0, 0), success: (h2) => { h2.res(h2.p, { stability: 3 }); }, say: { success: 'Services and patronage bought goodwill at home.' }, default: true }),
+      opt({ id: 'raise', label: 'Raise money', text: 'Taxes, sales, donors.', cost: C(0, 0, 1), success: (h2) => { h2.res(h2.p, { money: 5 }); }, say: { success: 'The treasury grew.' } }),
+      opt({ id: 'phones', label: 'Work the phones', text: 'Visits, favours and photo opportunities.', cost: C(2, 0, 0), success: (h2) => { h2.res(h2.p, { political: 1 }); for (const a of h2.allies(30).slice(0, 2)) h2.rel(h2.p, a, 3); }, say: { success: 'A fortnight of visits and favours.' } }),
     ],
   },
 ];

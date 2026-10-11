@@ -8,7 +8,7 @@
 import { ACTORS, ACTOR_BY_ID } from '../data/actors.js';
 import { EVENTS, EVENT_BY_ID, SCRIPTED, THRESHOLDS } from '../data/events.js';
 import { ACTION_BY_ID, affordable, canUse, ACTIONS } from './actions.js';
-import { createState, clamp, deriveWorld, W, res, alive, dateOf, infl, homeOf } from './state.js';
+import { createState, clamp, deriveWorld, W, res, alive, dateOf, infl, homeOf, rel } from './state.js';
 import { resolve as resolveDecl, evaluate, band, payCost } from './adjudicate.js';
 import { chooseAction, aiArguments, planArgs } from './ai.js';
 import { goalScore, goalReport } from './goals.js';
@@ -17,7 +17,7 @@ import { rand } from './rng.js';
 
 // Victory means materially improving your position: reach VICTORY_FLOOR, gain VICTORY_GAIN points over
 // your starting score, and fully meet at least half your objectives. Holding roughly steady is a draw.
-export const VICTORY_FLOOR = 60, VICTORY_GAIN = 15, DRAW_SLACK = 5;
+export const VICTORY_FLOOR = 68, VICTORY_GAIN = 22, DRAW_SLACK = 5;
 export function thresholds(s, id) {
   const start = Math.round(s.history[0]?.scores[id] ?? 0);
   const n = ACTOR_BY_ID[id].goals.length;
@@ -183,6 +183,15 @@ function upkeep(s) {
   // ISIS thrives on chaos.
   if (s.theaters.badiya.tension + s.theaters.neSyria.tension > 110 || s.actors.sdf.stability < 40) W(s, 'isisStrength', 1);
   if ((s.theaters.neSyria.infl.us || 0) >= 15) W(s, 'isisStrength', -1);
+  // Unfinished business: tracks revert unless the underlying problem is dealt with.
+  if (w.hamasDisarm < 30 && w.gazaCeasefire > 30) W(s, 'gazaCeasefire', -2);
+  if (s.actors.hamas.military >= 20 && !s.actors.hamas.collapsed) W(s, 'hamasDisarm', -1);
+  if (s.actors.hezbollah.military >= 35 && !s.actors.hezbollah.collapsed) W(s, 'hezbollahDisarm', -1);
+  if (w.westBankAnnex >= 35 || w.humanitarian < 35) W(s, 'normalization', -1);
+  if (s.actors.iran.stability >= 40 && w.iranSanctions < 70 && !s.actors.iran.collapsed) W(s, 'iranNuclear', 1);
+  if (s.actors.houthis.military >= 35 && rel(s, 'houthis', 'saudi') < 0 && !s.actors.houthis.collapsed) W(s, 'yemenWar', 2);
+  if (s.actors.isis.military >= 18 && !s.actors.isis.collapsed) W(s, 'isisStrength', 1);
+  if (w.kurdishAutonomy > 50 && s.actors.turkey.military >= 50) W(s, 'kurdishAutonomy', -1);
   // Drift.
   W(s, 'warIntensity', -1); W(s, 'yemenWar', -1);
   if (w.oilAdj > 0) W(s, 'oilAdj', -1); else if (w.oilAdj < 0) W(s, 'oilAdj', 1);
