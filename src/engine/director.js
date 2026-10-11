@@ -3,7 +3,7 @@
 import { SITUATIONS, SITUATION_BY_ID, appliesTo, makeHelpers } from '../data/situations/index.js';
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { THEATER_BY_ID } from '../data/theaters.js';
-import { WORLD_LABELS } from '../data/world.js';
+import { WORLD_LABELS, WORLD_SHORT } from '../data/world.js';
 import { ACTION_BY_ID, affordable, canUse, costOf, targetName } from './actions.js';
 import { band, clampP, rollFor, evaluate, applyOutcome, payCost } from './adjudicate.js';
 import { goalScore, goalKeys } from './goals.js';
@@ -30,6 +30,61 @@ const withIds = (opts) => { opts.forEach((o, i) => { if (o.id == null) o.id = `o
 const LIVE = new Map();
 const liveKey = (s, sitId) => `${s.seed}|${s.player}|${s.turn}|${sitId}`;
 
+// ── expected effects (what a success would do), shown as chips instead of prose ──
+// Direction of "good" for each world track from the player's objectives: +1 wants it up, -1 down, 0 neutral.
+export function goalDirs(p) {
+  const out = {};
+  for (const g of ACTOR_BY_ID[p].goals) if (g.get.world) out[g.get.world] = g.dir === '>=' ? 1 : -1;
+  return out;
+}
+const RES_SHORT = { money: '$', military: 'Mil', political: 'PC', stability: 'Stab' };
+export function effectChips(s, p, before, after, limit = 4) {
+  const dirs = goalDirs(p);
+  const chips = [];
+  for (const k of Object.keys(WORLD_LABELS)) {
+    if (k === 'oilAdj') continue;
+    const d = Math.round(after.world[k] - before.world[k]);
+    if (Math.abs(d) < 1) continue;
+    const dir = dirs[k] ?? (k === 'oil' ? (dirs.oil ?? 0) : 0);
+    chips.push({ kind: 'world', key: k, label: WORLD_SHORT[k] ?? k, d, good: dir === 0 ? 0 : Math.sign(d) * dir, unit: k === 'oil' ? '$' : '', w: (dir ? 3 : 1) * Math.abs(d) });
+  }
+  const a = after.actors[p], b = before.actors[p];
+  for (const k of ['stability', 'military', 'money', 'political']) {
+    const d = Math.round(a[k] - b[k]);
+    if (Math.abs(d) < 1) continue;
+    chips.push({ kind: 'res', key: k, label: RES_SHORT[k], d, good: Math.sign(d), unit: k === 'money' ? '$' : '', w: 2 * Math.abs(d) });
+  }
+  for (const id of Object.keys(after.actors)) {
+    if (id === p) continue;
+    const d = Math.round((after.rel[[p, id].sort().join('|')] ?? 0) - (before.rel[[p, id].sort().join('|')] ?? 0));
+    if (Math.abs(d) < 3) continue;
+    chips.push({ kind: 'rel', key: id, label: ACTOR_BY_ID[id].short, actor: id, d, good: Math.sign(d), unit: '', w: Math.abs(d) * 0.6 });
+  }
+  for (const t of Object.keys(after.theaters)) {
+    const d = Math.round((after.theaters[t].infl[p] || 0) - (before.theaters[t].infl[p] || 0));
+    if (Math.abs(d) < 3) continue;
+    chips.push({ kind: 'infl', key: t, label: `${THEATER_BY_ID[t].label ?? THEATER_BY_ID[t].name} infl`, d, good: Math.sign(d), unit: '', w: Math.abs(d) * 0.8 });
+  }
+  chips.sort((x, y) => y.w - x.w);
+  return chips.slice(0, limit).map(({ w, ...c }) => c);
+}
+function optionEffects(s, p, o, cost) {
+  const c = simClone(s);
+  payRaw(c, p, cost);
+  const base = simClone(c);
+  const h = makeHelpers(c, p);
+  try { o.success(h, 1); } catch (e) { report('preview', o.id, e); }
+  deriveWorld(c);
+  return effectChips(s, p, base, c);
+}
+export function actionEffects(s, p, action, target) {
+  const c = simClone(s);
+  payCost(c, p, action, 0);
+  const base = simClone(c);
+  try { applyOutcome(c, p, action, target, 'success'); } catch (e) { report('preview', action, e); }
+  return effectChips(s, p, base, c);
+}
+
 // ── dealing cards ──
 function materialize(s, p, def, h) {
   const live = withIds(def.options(h));
@@ -40,7 +95,8 @@ function materialize(s, p, def, h) {
     const pFinal = auto ? null : clampP(o.odds + reasons.reduce((n, r) => n + r.d, 0));
     const cost = o.cost ?? { money: 0, military: 0, political: 0 };
     return { id: o.id, label: o.label, text: o.text ?? '', cost, p: pFinal, band: auto ? null : band(pFinal), base: o.odds ?? null,
-      reasons: reasons.map((r) => ({ text: r.text, d: +r.d.toFixed(3) })), default: !!o.default, affordable: canAfford(s, p, cost), action: o.action ?? null, target: o.target ?? null };
+      reasons: reasons.map((r) => ({ text: r.text, d: +r.d.toFixed(3) })), default: !!o.default, affordable: canAfford(s, p, cost), action: o.action ?? null, target: o.target ?? null,
+      icon: o.icon ?? null, effects: optionEffects(s, p, o, cost) };
   });
   if (!options.some((o) => o.default)) options[options.length - 1].default = true;
   const at = str(def.at, h) ?? null;
@@ -114,9 +170,9 @@ function intelCard(s) {
     text: `${ACTOR_BY_ID[d.actor].short} sources indicate the move is planned for the coming fortnight. Your analysts judge it would ${delta > 0 ? 'help' : 'hurt'} your position${Math.abs(delta) >= 4 ? ' significantly' : ''}. Lobbying costs 1 political capital and shifts their odds by ${w} points.`,
     at: d.target && THEATER_BY_ID[d.target] ? d.target : homeOf(d.actor),
     options: [
-      { id: 'oppose', label: 'Lobby against it', text: 'Pressure, leaks, and a word in the right ears.', cost: cost1, p: null, band: null, base: null, reasons: [], default: false, affordable: pc >= 1, action: null, target: null },
-      { id: 'support', label: 'Quietly back it', text: 'Share intelligence and smooth the way.', cost: cost1, p: null, band: null, base: null, reasons: [], default: false, affordable: pc >= 1, action: null, target: null },
-      { id: 'ignore', label: 'Let it play out', text: 'Save your capital.', cost: { money: 0, military: 0, political: 0 }, p: null, band: null, base: null, reasons: [], default: true, affordable: true, action: null, target: null },
+      { id: 'oppose', label: 'Lobby against it', text: 'Pressure, leaks, and a word in the right ears.', cost: cost1, p: null, band: null, base: null, reasons: [], default: false, affordable: pc >= 1, action: null, target: null, icon: 'cross', effects: [{ kind: 'odds', key: d.actor, label: `${ACTOR_BY_ID[d.actor].short} odds`, d: -w, good: delta > 0 ? -1 : 1, unit: '%' }] },
+      { id: 'support', label: 'Quietly back it', text: 'Share intelligence and smooth the way.', cost: cost1, p: null, band: null, base: null, reasons: [], default: false, affordable: pc >= 1, action: null, target: null, icon: 'check', effects: [{ kind: 'odds', key: d.actor, label: `${ACTOR_BY_ID[d.actor].short} odds`, d: w, good: delta > 0 ? 1 : -1, unit: '%' }] },
+      { id: 'ignore', label: 'Let it play out', text: 'Save your capital.', cost: { money: 0, military: 0, political: 0 }, p: null, band: null, base: null, reasons: [], default: true, affordable: true, action: null, target: null, icon: 'pause', effects: [] },
     ],
     choice: null,
   };
@@ -141,7 +197,7 @@ export function proposals(s, n = 5) {
     const win = simClone(s); payCost(win, p, c.action, 0); applyOutcome(win, p, c.action, c.target, 'success');
     let serves = null, bestGain = 0.02;
     for (const g of def.goals) { const gain = g.progress(win) - g.progress(s); if (gain > bestGain) { bestGain = gain; serves = g.name; } }
-    return { action: c.action, target: c.target, name: ACTION_BY_ID[c.action].name, targetName: c.target ? targetName(c.target) : null, cost: costOf(ACTION_BY_ID[c.action], 0), p: ev.p, band: ev.band, ev: +c.ev.toFixed(2), why, serves };
+    return { action: c.action, target: c.target, name: ACTION_BY_ID[c.action].name, targetName: c.target ? targetName(c.target) : null, cost: costOf(ACTION_BY_ID[c.action], 0), p: ev.p, band: ev.band, ev: +c.ev.toFixed(2), why, serves, effects: actionEffects(s, p, c.action, c.target) };
   });
 }
 
@@ -230,14 +286,14 @@ export function isRelevant(s, p, r) {
   return Math.abs(i.dScore) >= 0.6 || Math.abs(i.dRes.stability) >= 1.5 || Math.abs(i.dRes.military) >= 1.5 || Math.abs(i.dRes.money) >= 2 || Math.abs(i.dRes.political) >= 1;
 }
 
-// Human-readable list of what a result changed for the player, restricted to tracks the player cares about.
+// Chips for what a result changed for the player, restricted to tracks the player cares about.
 export function impactLine(s, p, impact) {
   if (!impact) return [];
   const keys = goalKeys(ACTOR_BY_ID[p]).world;
+  const dirs = goalDirs(p);
   const out = [];
-  for (const [k, d] of Object.entries(impact.dWorld)) if (keys.has(k) || k === 'oil') out.push({ label: WORLD_LABELS[k], d, unit: k === 'oil' ? '$' : '' });
-  const R = { money: 'Treasury', military: 'Military', political: 'Political capital', stability: 'Stability' };
-  for (const [k, d] of Object.entries(impact.dRes)) if (Math.abs(d) >= 1) out.push({ label: R[k], d: Math.round(d), unit: k === 'money' ? '$' : '' });
+  for (const [k, d] of Object.entries(impact.dWorld)) if (keys.has(k) || k === 'oil') out.push({ kind: 'world', key: k, label: WORLD_SHORT[k] ?? k, d, good: dirs[k] ? Math.sign(d) * dirs[k] : 0, unit: k === 'oil' ? '$' : '' });
+  for (const [k, d] of Object.entries(impact.dRes)) if (Math.abs(d) >= 1) out.push({ kind: 'res', key: k, label: RES_SHORT[k], d: Math.round(d), good: Math.sign(d), unit: k === 'money' ? '$' : '' });
   return out;
 }
 
@@ -247,11 +303,12 @@ export function compileBriefing(s, mine, others, events, scoreBefore, worldBefor
   const affecting = others.filter((r) => isRelevant(s, p, r));
   const elsewhere = others.filter((r) => !affecting.includes(r));
   const keys = goalKeys(ACTOR_BY_ID[p]).world;
+  const dirs = goalDirs(p);
   const worldDelta = [];
   for (const k of Object.keys(WORLD_LABELS)) {
     if (!keys.has(k) && k !== 'oil') continue;
     const d = Math.round(s.world[k] - worldBefore[k]);
-    if (Math.abs(d) >= 2) worldDelta.push({ key: k, label: WORLD_LABELS[k], d, unit: k === 'oil' ? '$' : '' });
+    if (Math.abs(d) >= 2) worldDelta.push({ kind: 'world', key: k, label: WORLD_SHORT[k] ?? k, d, good: dirs[k] ? Math.sign(d) * dirs[k] : 0, unit: k === 'oil' ? '$' : '' });
   }
   return {
     turn: s.turn, date: dateOf(s.turn),

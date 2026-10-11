@@ -103,6 +103,7 @@ export function createMap(svg, { onTheaterClick, onTheaterHover }) {
     const halo = el('circle', { r: 12, class: 'halo' }, g);
     const ring = el('circle', { r: 15, class: 'ring', fill: 'none' }, g);
     const core = el('circle', { r: 6, class: 'core' }, g);
+    const badge = el('text', { x: 0, y: -13, class: 'badge', 'text-anchor': 'middle' }, g);
     const lbl = el('text', { x: 10, y: 4, class: 'lbl' }, g);
     lbl.textContent = t.label ?? t.name;
     if (['tehran', 'baghdad', 'redSea', 'israelHome', 'neSyria'].includes(t.id)) {
@@ -116,7 +117,7 @@ export function createMap(svg, { onTheaterClick, onTheaterHover }) {
     g.addEventListener('mouseenter', (e) => onTheaterHover?.(t.id, e));
     g.addEventListener('mousemove', (e) => onTheaterHover?.(t.id, e));
     g.addEventListener('mouseleave', () => onTheaterHover?.(null));
-    nodes[t.id] = { g, halo, ring, core };
+    nodes[t.id] = { g, halo, ring, core, badge };
   }
 
   const view = { svg, pos, anchors: A, nodes, arcs, fx, cam: 'overview', homeCountry: null };
@@ -168,7 +169,10 @@ export function renderMap(view, s, ui) {
     n.g.classList.toggle('hot', st.tension >= 75);
     n.g.classList.toggle('target', !!ui.targetable?.has(t.id));
     n.g.classList.toggle('selected', ui.selectedTheater === t.id || ui.target === t.id);
-    n.g.classList.toggle('card', !!ui.cards?.includes(t.id));
+    const kind = ui.cards?.[t.id];
+    n.g.classList.toggle('card', !!kind);
+    n.badge.textContent = kind === 'crisis' ? '!' : kind === 'opportunity' ? '✦' : kind === 'intel' ? '◉' : '';
+    n.badge.setAttribute('class', `badge ${kind ?? ''}`);
   }
 }
 

@@ -5,6 +5,7 @@ import { newGame, choose, setInitiative, clearInitiative, endTurn, autoTurn, pro
 import { isRelevant } from './engine/director.js';
 import { createMap, renderMap, drawArcs, flash } from './ui/mapView.js';
 import * as P from './ui/panels.js';
+import { iconSheet } from './ui/icons.js';
 import { installDev } from './dev/dev.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -12,14 +13,14 @@ const params = new URLSearchParams(location.search);
 
 export const app = {
   s: null,
-  ui: { tab: 'command', cat: 'all', action: null, target: undefined, commit: 0, selectedTheater: null, targetable: new Set(), startPick: 'us', showAll: false, why: new Set(), proposals: null, overlay: null },
+  ui: { tab: 'command', cat: 'all', action: null, target: undefined, commit: 0, selectedTheater: null, targetable: new Set(), startPick: 'us', showAll: false, why: new Set(), expanded: new Set(), proposals: null, overlay: null },
   metrics: { lastTurnMs: 0, renders: 0 },
   errors: [],
   map: null,
 };
 
 function resetTurnUi() {
-  Object.assign(app.ui, { action: null, target: undefined, commit: 0, targetable: new Set(), showAll: false, why: new Set(), proposals: null });
+  Object.assign(app.ui, { action: null, target: undefined, commit: 0, targetable: new Set(), showAll: false, why: new Set(), expanded: new Set(), proposals: null });
 }
 
 export function startGame(player, seed = +(params.get('seed') ?? Date.now() % 100000)) {
@@ -51,7 +52,9 @@ export function render() {
     for (const t of ACTION_BY_ID[ui.action].targets(s, s.player)) ui.targetable.add(t);
   const init = s.orders.initiative;
   ui.target = init?.target ?? ui.target;
-  renderMap(app.map, s, { ...ui, target: init && s.theaters[init.target] ? init.target : undefined, cards: s.situations.map((x) => x.at).filter(Boolean) });
+  const cards = {};
+  for (const x of s.situations) if (x.at && !cards[x.at]) cards[x.at] = x.kind;
+  renderMap(app.map, s, { ...ui, target: init && s.theaters[init.target] ? init.target : undefined, cards });
   const latest = s.news.at(-1)?.text ?? s.log.at(-1)?.text ?? '';
   $('#tickerText').textContent = latest;
 }
@@ -135,6 +138,7 @@ function onPanelClick(e) {
   switch (act) {
     case 'choose': { const sit = s.situations.find((x) => x.id === b.dataset.sit); const same = sit && sit.choice === b.dataset.opt; choose(s, b.dataset.sit, same ? null : b.dataset.opt); render(); break; }
     case 'why': if (ui.why.has(id)) ui.why.delete(id); else ui.why.add(id); render(); break;
+    case 'more': if (ui.expanded.has(id)) ui.expanded.delete(id); else ui.expanded.add(id); render(); break;
     case 'prop': pickProposal(b.dataset.action, b.dataset.target === '' ? null : b.dataset.target); break;
     case 'toggleAll': ui.showAll = !ui.showAll; ui.action = null; render(); break;
     case 'cat': ui.cat = id; render(); break;
@@ -189,6 +193,7 @@ function onTheaterHover(id, ev) {
 function boot() {
   window.addEventListener('error', (e) => app.errors.push(String(e.message)));
   window.addEventListener('unhandledrejection', (e) => app.errors.push(String(e.reason)));
+  document.body.insertAdjacentHTML('afterbegin', iconSheet());
   app.map = createMap($('#map'), { onTheaterClick, onTheaterHover });
   $('#panel').addEventListener('click', onPanelClick);
   $('#panel').addEventListener('keydown', onPanelKey);

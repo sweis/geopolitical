@@ -26,3 +26,9 @@ export const WORLD_LABELS = {
   westBankAnnex: 'West Bank annexation', hezbollahDisarm: 'Hezbollah disarmament', normalization: 'Saudi–Israel normalization',
   yemenWar: 'Yemen war', isisStrength: 'ISIS strength', kurdishAutonomy: 'Kurdish autonomy', usWarSupport: 'US war support',
 };
+
+export const WORLD_SHORT = {
+  oil: 'Brent', hormuz: 'Hormuz', redSea: 'Red Sea', warIntensity: 'Iran war', iranNuclear: 'Breakout', iranSanctions: 'Sanctions',
+  gazaCeasefire: 'Gaza truce', hamasDisarm: 'Hamas arms', isfDeployed: 'ISF', humanitarian: 'Gaza aid', westBankAnnex: 'Annexation',
+  hezbollahDisarm: 'Hezb. arms', normalization: 'Normalize', yemenWar: 'Yemen war', isisStrength: 'ISIS', kurdishAutonomy: 'Kurdish rule', usWarSupport: 'US support',
+};
