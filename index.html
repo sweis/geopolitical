@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Red Lines — Middle East 2026</title>
+  <meta name="description" content="A browser matrix game of the 2026 Middle East: argue your actions, the game master adjudicates." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%23e5484d' stroke-width='2'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%23f0b429'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand"><span class="mark"></span><span class="title">RED LINES</span><span class="sub">Middle East 2026</span></div>
+      <div id="clock" class="clock"></div>
+      <div id="indicators" class="indicators"></div>
+      <div class="top-actions">
+        <button id="btnHelp" class="ghost" title="How to play">How to play</button>
+      </div>
+    </header>
+    <main id="main">
+      <section id="mapwrap" aria-label="Theater map">
+        <svg id="map" role="img" aria-label="Map of the Middle East theater"></svg>
+        <div id="tooltip" hidden></div>
+        <div class="map-controls">
+          <button data-cam="overview" title="Whole theater">Theater</button>
+          <button data-cam="levant" title="Levant">Levant</button>
+          <button data-cam="gulf" title="Gulf">Gulf</button>
+          <button data-cam="hero-close" title="Your home theater">Home</button>
+        </div>
+      </section>
+      <aside id="side">
+        <div id="actorCard"></div>
+        <nav id="tabs" role="tablist">
+          <button role="tab" data-tab="command" class="on">Command</button>
+          <button role="tab" data-tab="futures">Futures</button>
+          <button role="tab" data-tab="goals">Goals</button>
+          <button role="tab" data-tab="intel">Intel</button>
+          <button role="tab" data-tab="log">Log</button>
+        </nav>
+        <div id="panel"></div>
+      </aside>
+    </main>
+    <footer id="ticker"><span class="tag">WIRE</span><span id="tickerText"></span></footer>
+  </div>
+  <div id="modal" hidden></div>
+  <div id="diag" hidden></div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
