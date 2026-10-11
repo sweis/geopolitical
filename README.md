@@ -1,2 +1,0 @@
-# geopolitical
-Geopolitical Game
