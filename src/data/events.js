@@ -60,7 +60,8 @@ export const SCRIPTED = {
       ? 'US midterms: Democrats take the House on an anti-war, anti-gas-price wave. Oversight hearings loom.'
       : 'US midterms: Republicans hold both chambers; the White House claims a mandate on Iran.'),
     apply: (s) => {
-      if (s.world.usWarSupport < 40) { res(s, 'us', { political: -3, stability: -4 }); }
+      s.flags.midterms = s.world.usWarSupport < 40 ? 'lost' : 'held';
+      if (s.flags.midterms === 'lost') { res(s, 'us', { political: -3, stability: -4 }); }
       else { res(s, 'us', { political: 3, stability: 3 }); }
     },
   },
@@ -76,5 +77,5 @@ export const THRESHOLDS = [
     apply: (s) => { W(s, 'oilAdj', -3); } },
   { id: 'gazaCollapse', at: 'gaza', when: (s) => s.world.gazaCeasefire <= 10,
     text: 'The Gaza ceasefire has collapsed. Full-scale war resumes.',
-    apply: (s) => { W(s, 'humanitarian', -10); res(s, 'egypt', { stability: -5 }); } },
+    apply: (s) => { W(s, 'humanitarian', -10); res(s, 'egypt', { stability: -5 }); s.flags.gazaCollapse = true; } },
 ];

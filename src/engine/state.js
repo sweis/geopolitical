@@ -14,11 +14,16 @@ export function createState({ seed = 1, player = null, maxTurns = MAX_TURNS } = 
   const s = {
     version: 1,
     seed, rng: seed | 0,
-    turn: 1, maxTurns, phase: 'declare',
+    turn: 1, maxTurns, phase: 'turn',
     player,
     world: { ...WORLD_START },
     actors: {}, theaters: {}, rel: {},
-    declared: {}, debate: [], results: [], news: [], log: [], history: [], flags: {},
+    // Per-turn working set: AI declarations, the player's situation cards and orders.
+    declared: {}, argUsed: {}, situations: [], orders: { initiative: null },
+    // What happened: this turn's results and events, the relevance-filtered briefing, and a short
+    // structured memory of recent results that situations and AI grudges read.
+    results: [], news: [], briefing: null, recent: [], cool: {},
+    log: [], history: [], flags: {},
     outcome: null,
   };
   for (const a of ACTORS) s.actors[a.id] = { id: a.id, ...a.start, collapsed: false };
@@ -39,7 +44,7 @@ export function simClone(s) {
   const actors = {}, theaters = {};
   for (const k in s.actors) actors[k] = { ...s.actors[k] };
   for (const k in s.theaters) theaters[k] = { id: k, tension: s.theaters[k].tension, infl: { ...s.theaters[k].infl } };
-  return { ...s, world: { ...s.world }, actors, theaters, rel: { ...s.rel }, flags: { ...s.flags }, log: [], history: [], news: [], results: [] };
+  return { ...s, world: { ...s.world }, actors, theaters, rel: { ...s.rel }, flags: { ...s.flags }, log: [], history: [], news: [], results: [], declared: s.declared };
 }
 import { relKey, rel } from './relations.js';
 export { relKey, rel };
@@ -88,3 +93,19 @@ export function hostiles(s, a, t, thr = -40) {
 }
 
 export const homeOf = (id) => ACTOR_BY_ID[id].home;
+
+// Results from the last `within` completed turns (recent entries carry the turn they resolved in).
+export const recentOf = (s, within = 1) => s.recent.filter((r) => r.turn >= s.turn - within && r.turn < s.turn);
+
+// Did a successful hostile action by `by` land on actor `a` (directly, or on its home theater)?
+export function hitBy(s, a, within = 1) {
+  const home = homeOf(a);
+  const out = [];
+  for (const r of recentOf(s, within)) {
+    if (r.kind !== 'action' || !r.ok || r.actor === a) continue;
+    if (!HOSTILE_ACTIONS.has(r.action)) continue;
+    if (r.target === a || (home && r.target === home)) out.push(r);
+  }
+  return out;
+}
+export const HOSTILE_ACTIONS = new Set(['strike', 'massiveBombing', 'offensive', 'harass', 'decapitation', 'terror', 'prisonBreak', 'cyber', 'infoOps', 'sanctions', 'counterTerror']);

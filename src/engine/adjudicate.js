@@ -1,4 +1,5 @@
 // The game master: turns an argued action into a probability, rolls, and applies the outcome.
+// Rolls are never shown to the player; the UI narrates outcomes. They stay in state for tests.
 import { ACTION_BY_ID, COMMIT, costOf, targetName } from './actions.js';
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { res, deriveWorld } from './state.js';
@@ -11,6 +12,7 @@ const BANDS = [
   [0.25, 'Unlikely'], [0.1, 'Very unlikely'], [0, 'Remote'],
 ];
 export const band = (p) => BANDS.find(([t]) => p >= t)[1];
+export const clampP = (p) => Math.max(P_MIN, Math.min(P_MAX, p));
 
 export function evaluate(s, a, actionId, target, commit = 0, args = []) {
   const act = ACTION_BY_ID[actionId];
@@ -20,7 +22,7 @@ export function evaluate(s, a, actionId, target, commit = 0, args = []) {
   let debate = args.reduce((n, x) => n + x.d, 0);
   debate = Math.max(-DEBATE_CAP, Math.min(DEBATE_CAP, debate));
   const raw = act.base + modSum + commitBonus + debate;
-  const p = Math.max(P_MIN, Math.min(P_MAX, raw));
+  const p = clampP(raw);
   return { p: +p.toFixed(3), base: act.base, mods, commitBonus, debate: +debate.toFixed(3), band: band(p) };
 }
 
@@ -45,18 +47,22 @@ export function narrate(actionId, a, target, ok) {
 }
 
 // Roll d100 under p*100. The bottom fifth of the success band is exceptional; 96+ on a failure is blowback.
-export function resolve(s, decl) {
-  const { actor: a, action, target, commit, args } = decl;
-  const ev = evaluate(s, a, action, target, commit, args);
+export function rollFor(s, p) {
   const roll = d100(s);
-  const pct = Math.round(ev.p * 100);
+  const pct = Math.round(p * 100);
   let outcome;
   if (roll <= pct) outcome = roll <= Math.max(1, Math.round(pct * 0.2)) ? 'crit' : 'success';
   else outcome = roll >= 96 ? 'blowback' : 'fail';
+  return { roll, outcome, ok: outcome === 'crit' || outcome === 'success' };
+}
+
+export function resolve(s, decl) {
+  const { actor: a, action, target, commit, args } = decl;
+  const ev = evaluate(s, a, action, target, commit, args);
+  const { roll, outcome, ok } = rollFor(s, ev.p);
   applyOutcome(s, a, action, target, outcome);
-  const ok = outcome === 'crit' || outcome === 'success';
   let text = narrate(action, a, target, ok);
   if (outcome === 'crit') text += ' An exceptional result.';
   if (outcome === 'blowback') text += ' It backfired badly.';
-  return { actor: a, action, target, commit, p: ev.p, band: ev.band, roll, outcome, ok, text, mods: ev.mods, debate: ev.debate, args };
+  return { kind: 'action', actor: a, action, target, commit, p: ev.p, band: ev.band, roll, outcome, ok, text, mods: ev.mods, debate: ev.debate, args };
 }

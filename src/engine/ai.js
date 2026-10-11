@@ -7,8 +7,10 @@ import { goalScore } from './goals.js';
 import { simClone as clone } from './state.js';
 import { evaluate, payCost, applyOutcome } from './adjudicate.js';
 import { rand, pick } from './rng.js';
+import { hitBy, homeOf } from './state.js';
 
 const TEMPERATURE = 0.6;
+const GRUDGE_BONUS = 2.5;
 export const ARGUE_THRESHOLD = 1.0;
 const MAX_ARGS_PER_ACTOR = 2;
 const MAX_SIDE_PER_DECL = 3;
@@ -38,9 +40,24 @@ export function expectedGain(s, a, cand, base = utility(s, a)) {
   return p * utility(win, a) + (1 - p) * utility(lose, a) - base;
 }
 
+// Actors who hit this one last turn. Retaliation gets a bonus so consequences follow the player around.
+export function grudges(s, a) {
+  return [...new Set(hitBy(s, a, 1).map((r) => r.actor))];
+}
+function grudgeBonus(s, a, c) {
+  const act = ACTION_BY_ID[c.action];
+  if (act.cat !== 'military' && act.cat !== 'covert') return 0;
+  for (const g of grudges(s, a)) {
+    if (c.target === g) return GRUDGE_BONUS;
+    const t = s.theaters[c.target];
+    if (t && (homeOf(g) === c.target || (t.infl[g] || 0) >= 30)) return GRUDGE_BONUS;
+  }
+  return 0;
+}
+
 export function chooseAction(s, a) {
   const base = utility(s, a);
-  const scored = candidates(s, a).map((c) => ({ ...c, ev: expectedGain(s, a, c, base) }));
+  const scored = candidates(s, a).map((c) => ({ ...c, ev: expectedGain(s, a, c, base) + grudgeBonus(s, a, c) }));
   if (!scored.length) return null;
   scored.sort((x, y) => y.ev - x.ev);
   const top = scored.slice(0, 6);
@@ -89,8 +106,9 @@ export function reserved(s, id) {
   return d ? costOf(ACTION_BY_ID[d.action], d.commit).political : 0;
 }
 
-// AI actors spend political capital arguing on declarations they care about most.
-export function aiArguments(s, decls, skip = null) {
+// AI actors spend political capital arguing on declarations they care about most. With spend=false
+// the same plan is returned without touching state (used to preview the opposition a move will meet).
+export function planArgs(s, decls, skip = null, spend = true) {
   const triples = [];
   decls.forEach((d, i) => {
     d.stakes = stakes(s, d);
@@ -100,14 +118,19 @@ export function aiArguments(s, decls, skip = null) {
     }
   });
   triples.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
-  const used = {};
+  const used = { ...(s.argUsed || {}) };
+  const planned = [];
   for (const { i, b, delta } of triples) {
     const d = decls[i];
     const stance = delta > 0 ? 1 : -1;
     if ((used[b] || 0) >= MAX_ARGS_PER_ACTOR || s.actors[b].political - reserved(s, b) < 1) continue;
-    if (d.args.filter((x) => x.stance === stance).length >= MAX_SIDE_PER_DECL) continue;
-    s.actors[b].political -= 1;
+    if (d.args.filter((x) => x.stance === stance).length + planned.filter((x) => x.i === i && x.stance === stance).length >= MAX_SIDE_PER_DECL) continue;
     used[b] = (used[b] || 0) + 1;
-    d.args.push({ by: b, stance, d: stance * argWeight(b), text: argText(s, b, stance, d.action) });
+    const arg = { by: b, stance, d: stance * argWeight(b), text: spend ? argText(s, b, stance, d.action) : '' };
+    planned.push({ i, ...arg });
+    if (spend) { s.actors[b].political -= 1; d.args.push(arg); }
   }
+  if (spend) s.argUsed = used;
+  return planned;
 }
+export const aiArguments = (s, decls, skip = null) => planArgs(s, decls, skip, true);

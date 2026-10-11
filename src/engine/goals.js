@@ -10,9 +10,20 @@ export function atMost(name, get, thr, hi, w = 1, unit = '') {
   return { name, get, thr, lo: hi, w, unit, dir: '<=', progress: (s) => clamp01((hi - get(s)) / (hi - thr)) };
 }
 
-export const W = (k) => (s) => s.world[k];
-export const R = (id, k) => (s) => s.actors[id][k];
-export const INF = (theater, id) => (s) => s.theaters[theater].infl[id] || 0;
+// Getters are tagged with what they read so the UI can show each actor only the tracks its goals use.
+export const W = (k) => Object.assign((s) => s.world[k], { world: k });
+export const R = (id, k) => Object.assign((s) => s.actors[id][k], { actor: id, resource: k });
+export const INF = (theater, id) => Object.assign((s) => s.theaters[theater].infl[id] || 0, { theater, who: id });
+
+export function goalKeys(actorDef) {
+  const world = new Set(), theaters = new Set(), actors = new Set();
+  for (const g of actorDef.goals) {
+    if (g.get.world) world.add(g.get.world);
+    if (g.get.theater) theaters.add(g.get.theater);
+    if (g.get.actor) actors.add(g.get.actor);
+  }
+  return { world, theaters, actors };
+}
 
 export function goalScore(actorDef, s) {
   let sum = 0, wsum = 0;
