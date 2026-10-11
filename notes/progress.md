@@ -29,7 +29,7 @@ Turn = 2 weeks from 12 Oct 2026, 16 turns. One screen per turn:
 
 Chains: results go into `s.recent` (last 4 turns) and flags; situations read them (`h.did`, `h.hit`, `h.event`, `h.chose`, `h.flag`). Options built from catalogue actions are also recorded as actions, so the AI's grudges and the chains see them (bomb Iran → "Iran answers in the Gulf" + "Jerusalem asks for the big bombs" next turn).
 
-Victory: score ≥ max(68, start+22) **and** ≥ half of objectives fully met at turn 16; draw if ≥ start−5; all objectives met after turn 6 = decisive early win; stability 0 = collapse.
+Victory: score ≥ max(75, start+28) at turn 16; draw if ≥ start−5; all objectives met after turn 6 = decisive early win; stability 0 = collapse. (An objectives-met requirement was tried and dropped: scores of 90 ending in a draw felt wrong.)
 
 ### Dev hooks (`?dev=1`)
 `window.game`: `getState()`, `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`.
@@ -39,12 +39,12 @@ Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader 
 - `node tests/engine.mjs`: content probes, scripted player turn through the API (cards dealt, choose, initiative, endTurn, briefing split, recent history), 3 observer games with no NaN, same-seed determinism.
 - `node tests/situations.mjs 2`: 148 situations, 0 content errors; cards per turn 1.3–2.0 for every seat; AI-played seats see 9–16 distinct situations per 2 games. 26–32 situations never fire in AI-only games — most are chain-dependent (they need the player to have done the thing).
 - `node tests/browser.mjs`: cold boot clean; real-mouse path (pick US → answer the CENTCOM card → pick a proposal → open the catalogue → choose air strikes → click Hormuz on the map → raise commitment → end turn → briefing overlay → continue) with getState assertions; no digits in the odds display and no "d100/roll" text in the briefing; stills over all 19 actors (each with ≥1 card) and 5 cameras; 10 s autoplay soak completes 16 turns; phone viewport has no overflow.
-- Balance (AI plays each seat, 3 seeds, after this session's tuning at floor 70/gain 25): 9 W / 46 D / 2 L with final scores mostly 65–85. Thresholds then lowered to 68/22 and half-of-objectives (not re-swept).
+- Balance (`node tests/verdicts.mjs 3`, AI plays each seat): before this session's pushback the cards made it trivial (46 W / 10 D / 1 L); after reversion, gang-up-on-the-leader and the score-only bar at 75/+28: **20 W / 35 D / 2 L**, final scores mostly 65–90. Seats that start high (Hezbollah, PIJ, Iraqi militias, Russia) need 85–93 and rarely get there; SDF is the only seat that loses outright.
 - Perf: turn compute ~100–250 ms in headless Chromium (proposals + 19 AI lookaheads + card generation).
 
 ## Not verified
 - Human playtest of the new flow.
-- Balance after the final threshold change; the human-vs-AI gap is unknown.
+- How a human's results compare with the AI seat (the AI is greedy and never plans chains).
 - Firefox/Safari, real phones.
 
 ## Design notes / next
