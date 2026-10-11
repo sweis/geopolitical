@@ -31,6 +31,9 @@ Chains: results go into `s.recent` (last 4 turns) and flags; situations read the
 
 Victory: score ≥ max(75, start+28) at turn 16; draw if ≥ start−5; all objectives met after turn 6 = decisive early win; stability 0 = collapse. (An objectives-met requirement was tried and dropped: scores of 90 ending in a draw felt wrong.)
 
+### Visual pass (session 2, later)
+Less prose, more signal: every option/proposal/result has an icon (`src/ui/icons.js`, inline SVG sheet injected at boot; action → icon map plus word heuristics for hand-written options), a five-pip odds meter with the band word, and **effect chips** computed by the engine (`director.effectChips`: simulate the success outcome on a clone, diff the player's tracks/resources/relations/influence, color by whether the change helps the player's objectives). Cost is icon+number. Card briefs show the first sentence with the rest behind "more"; an option's description shows only when selected. Theater markers carry a badge for the card dealt there (! crisis, ✦ opportunity, ◉ intel). The briefing uses outcome glyphs, chips and a score sparkline. Start/help screens cut to a few lines.
+
 ### Dev hooks (`?dev=1`)
 `window.game`: `getState()`, `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`.
 Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader counts are null.
@@ -40,7 +43,8 @@ Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader 
 - `node tests/situations.mjs 2`: 148 situations, 0 content errors; cards per turn 1.3–2.0 for every seat; AI-played seats see 9–16 distinct situations per 2 games. 26–32 situations never fire in AI-only games — most are chain-dependent (they need the player to have done the thing).
 - `node tests/browser.mjs`: cold boot clean; real-mouse path (pick US → answer the CENTCOM card → pick a proposal → open the catalogue → choose air strikes → click Hormuz on the map → raise commitment → end turn → briefing overlay → continue) with getState assertions; no digits in the odds display and no "d100/roll" text in the briefing; stills over all 19 actors (each with ≥1 card) and 5 cameras; 10 s autoplay soak completes 16 turns; phone viewport has no overflow.
 - Balance (`node tests/verdicts.mjs 3`, AI plays each seat): before this session's pushback the cards made it trivial (46 W / 10 D / 1 L); after reversion, gang-up-on-the-leader and the score-only bar at 75/+28: **20 W / 35 D / 2 L**, final scores mostly 65–90. Seats that start high (Hezbollah, PIJ, Iraqi militias, Russia) need 85–93 and rarely get there; SDF is the only seat that loses outright.
-- Perf: turn compute ~100–250 ms in headless Chromium (proposals + 19 AI lookaheads + card generation).
+- Perf: turn compute ~100–250 ms in headless Chromium (proposals + 19 AI lookaheads + card generation + effect previews).
+- Visual pass verified by captures through the real page (turn screen, proposals/initiative, briefing) and the full suite (engine, situation probe, browser) passing afterwards.
 
 ## Not verified
 - Human playtest of the new flow.
