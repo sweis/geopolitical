@@ -616,7 +616,7 @@ export const ACTIONS = [
     mods: () => [],
     success: (s, a, t) => {
       infl(s, t, a, -25); res(s, a, { money: 4, military: 3 });
-      if (a === 'us') W(s, 'usWarSupport', 5);
+      if (a === 'us') W(s, 'usWarSupport', 3);
       if (t === 'hormuz') W(s, 'hormuz', -8);
       if (t === 'babElMandeb' || t === 'redSea') W(s, 'redSea', -6);
       if (a === 'israel') res(s, 'israel', { stability: -2 });

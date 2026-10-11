@@ -168,10 +168,11 @@ export function renderMap(view, s, ui) {
     n.g.classList.toggle('hot', st.tension >= 75);
     n.g.classList.toggle('target', !!ui.targetable?.has(t.id));
     n.g.classList.toggle('selected', ui.selectedTheater === t.id || ui.target === t.id);
+    n.g.classList.toggle('card', !!ui.cards?.includes(t.id));
   }
 }
 
-export function drawArcs(view, results, player) {
+export function drawArcs(view, results, player, relevant = new Set()) {
   view.arcs.innerHTML = '';
   for (const r of results) {
     if (!r.target || r.outcome === 'fizzle') continue;
@@ -182,7 +183,7 @@ export function drawArcs(view, results, player) {
     const dx = to[0] - from[0], dy = to[1] - from[1];
     const bend = 0.22;
     const d = `M${from[0]},${from[1]} Q${mx - dy * bend},${my + dx * bend} ${to[0]},${to[1]}`;
-    el('path', { d, class: `arc ${r.ok ? 'ok' : 'bad'} ${r.actor === player ? 'mine' : ''}` }, view.arcs);
+    el('path', { d, class: `arc ${r.ok ? 'ok' : 'bad'} ${r.actor === player ? 'mine' : relevant.has(r.actor) ? 'rel' : 'faint'}` }, view.arcs);
   }
 }
 

@@ -128,7 +128,9 @@ export function proposals(s, n = 5) {
   if (!p || s.actors[p].collapsed) return [];
   const base = utility(s, p);
   const def = ACTOR_BY_ID[p];
-  const scored = candidates(s, p).filter((c) => c.commit === 0 && c.action !== 'hold').map((c) => ({ ...c, ev: expectedGain(s, p, c, base) }));
+  // Housekeeping moves stay in the catalogue; proposals are initiatives.
+  const HOUSEKEEPING = new Set(['hold', 'withdraw', 'fortify']);
+  const scored = candidates(s, p).filter((c) => c.commit === 0 && !HOUSEKEEPING.has(c.action)).map((c) => ({ ...c, ev: expectedGain(s, p, c, base) }));
   const best = {};
   for (const c of scored) if (!best[c.action] || c.ev > best[c.action].ev) best[c.action] = c;
   const list = Object.values(best).sort((a, b) => b.ev - a.ev).slice(0, n);
@@ -196,6 +198,8 @@ export function resolveSituations(s) {
     const r = { kind: 'situation', actor: p, id: sit.id, option: mat.id, title: sit.title, label: mat.label, at: sit.at, p: mat.p, band: mat.band, roll, outcome, ok, text, impact: impactSince(s, p, before) };
     out.push(r);
     s.recent.push({ turn: s.turn, kind: 'situation', actor: p, id: sit.id, option: mat.id, ok, text });
+    // An option built from a catalogue action also counts as that action, so chains and grudges see it.
+    if (mat.action) s.recent.push({ turn: s.turn, kind: 'action', actor: p, action: mat.action, target: mat.target, ok, outcome, text });
     s.log.push({ turn: s.turn, kind: ok ? 'success' : 'fail', text: `${sit.title} — ${mat.label}. ${text}`, actor: p });
   }
   return out;

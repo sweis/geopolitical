@@ -1,9 +1,11 @@
 // Browser tests through the real player path. Writes captures to test-output/.
 //   1. cold boot (no flags, fresh context): no console errors, start screen visible, full-window capture
-//   2. real mouse play: pick actor → action → click a theater on the map → declare → argue → adjudicate → next
-//   3. getState assertions after each phase
+//   2. real mouse play: pick actor → answer a situation card → pick a proposal → open the full list,
+//      pick an order and click its target on the map → end turn → read the briefing → continue
+//   3. getState assertions after each step
 //   4. stills sweep over every actor in the registry and every named camera: fail on blank frames
 //   5. autoplay soak (~10 s): sim time advances, no console errors
+//   6. phone viewport: no horizontal overflow
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
 import { serve } from './server.mjs';
@@ -24,7 +26,7 @@ async function newPage(viewport = { width: 1440, height: 900 }) {
   page.on('pageerror', (e) => page.errors.push(e.message));
   return page;
 }
-// Blank-frame check on the composited screenshot: mean luma and fraction of pixels that differ from the mode.
+// Blank-frame check on the composited screenshot: mean luma and spread.
 async function frameStats(page, path) {
   const buf = await page.screenshot({ path });
   return page.evaluate(async (b64) => {
@@ -44,6 +46,7 @@ const click = async (page, sel) => {
   const b = await loc.boundingBox();
   await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
 };
+const state = (page) => page.evaluate(() => game.getState());
 
 // 1. Cold boot.
 {
@@ -65,40 +68,49 @@ const click = async (page, sel) => {
   await page.waitForTimeout(600);
   await click(page, '[data-act="pick"][data-id="us"]');
   await click(page, '[data-act="begin"]');
-  let s = await page.evaluate(() => game.getState());
-  ok(s.player === 'us' && s.turn === 1 && s.phase === 'declare' && !s.ui.modalOpen, 'start via mouse: playing US, turn 1, declare phase');
+  let s = await state(page);
+  ok(s.player === 'us' && s.turn === 1 && s.phase === 'turn' && !s.ui.modalOpen, 'start via mouse: playing US, turn 1, your move');
+  ok(s.situations.length >= 1 && s.situations.every((x) => x.options.length >= 2), `cards dealt: ${s.situations.map((x) => x.id).join(', ')}`);
+  ok(s.declared.length === 18, 'every other actor has declared before the player moves');
+  // Answer the first card with its first affordable option, by clicking the row.
+  const card = s.situations[0];
+  const opt = card.options.find((o) => o.affordable);
+  await click(page, `.card[data-sit="${card.id}"] [data-act="choose"][data-opt="${opt.id}"]`);
+  s = await state(page);
+  ok(s.situations[0].choice === opt.id, `card answered by mouse (${card.id} → ${opt.id})`);
+  // Pick the first proposal.
+  await click(page, '[data-act="prop"]');
+  s = await state(page);
+  ok(!!s.orders.initiative, `proposal selected as initiative: ${s.orders.initiative?.action} ${s.orders.initiative?.target ?? ''}`);
+  // Open the full list, choose air strikes, and target Hormuz by clicking the map marker.
+  await click(page, '[data-act="toggleAll"]');
   await click(page, '[data-act="action"][data-id="strike"]');
-  await page.waitForTimeout(100);
-  // Target by clicking the Hormuz marker on the map (real coordinates).
+  s = await state(page);
+  ok(s.ui.action === 'strike' && !s.orders.initiative, 'catalogue action selected; waiting for a target');
   await click(page, '#map .th[data-id="hormuz"] .core');
-  s = await page.evaluate(() => game.getState());
-  ok(s.ui.action === 'strike' && s.ui.target === 'hormuz', `map click targets Hormuz (ui.target=${s.ui.target})`);
+  s = await state(page);
+  ok(s.orders.initiative?.action === 'strike' && s.orders.initiative?.target === 'hormuz', `map click set the target (${s.orders.initiative?.target})`);
   await click(page, '[data-act="commit"][data-id="1"]');
+  s = await state(page);
+  ok(s.orders.initiative?.commit === 1, 'commitment raised to Major effort');
   const pv = await page.evaluate(() => game.preview('strike', 'hormuz', 1));
-  ok(pv.p >= 0.05 && pv.p <= 0.95 && pv.mods.length > 0, `preview probability ${pv.p} (${pv.band}) with ${pv.mods.length} reasons`);
-  await frameStats(page, OUT + 'declare.png');
-  await click(page, '[data-act="declare"]');
-  await page.waitForFunction(() => game.getState().phase === 'debate', null, { timeout: 10000 });
-  s = await page.evaluate(() => game.getState());
-  const alive = Object.values(s.actors).filter((a) => !a.collapsed).length;
-  ok(s.declared.length === alive, `debate: all ${alive} live actors declared (${s.declared.length})`);
-  if (s.debate.length) {
-    const before = s.actors.us.political;
-    await click(page, `[data-act="argue"][data-id="${s.debate[0].actor}"][data-stance="-1"]`);
-    const after = (await page.evaluate(() => game.getState())).actors.us.political;
-    ok(after === before - 1, `arguing costs 1 PC (${before} → ${after})`);
-  }
-  await frameStats(page, OUT + 'debate.png');
-  await click(page, '[data-act="resolve"]');
-  await page.waitForFunction(() => game.getState().phase === 'results', null, { timeout: 10000 });
-  s = await page.evaluate(() => game.getState());
-  ok(s.results.length > 0 && s.results.every((r) => r.outcome === 'fizzle' || (r.p >= 0.05 && r.p <= 0.95 && r.roll >= 1 && r.roll <= 100)), `results: ${s.results.length} adjudications with valid p and d100`);
-  ok(s.historyLength === 2 && Number.isFinite(s.scores.us), `history snapshot recorded, score ${s.scores.us}`);
-  await page.locator('#panel').evaluate((e) => (e.scrollTop = 0));
-  await frameStats(page, OUT + 'results.png');
-  await click(page, '[data-act="next"]');
-  s = await page.evaluate(() => game.getState());
-  ok(s.turn === 2 && s.phase === 'declare' && s.simTime === 1, `next turn: turn ${s.turn}, simTime ${s.simTime}`);
+  ok(pv.p >= 0.05 && pv.p <= 0.95 && pv.band && !/\d/.test(await page.locator('.box.init .odds').innerText()), `odds shown as words only ("${pv.band}")`);
+  ok(s.orders.total.money > 0, `orders total computed ($${s.orders.total.money}, ${s.orders.total.military} mil, ${s.orders.total.political} PC)`);
+  await frameStats(page, OUT + 'turn.png');
+  await click(page, '[data-act="endTurn"]');
+  await page.waitForFunction(() => game.getState().turn === 2, null, { timeout: 15000 });
+  s = await state(page);
+  ok(s.turn === 2 && s.phase === 'turn' && s.simTime === 1, `end turn: now turn ${s.turn}, simTime ${s.simTime}`);
+  ok(s.ui.modalOpen && s.ui.overlay === 'briefing', 'briefing overlay opened after the turn');
+  ok(s.briefing.mine >= 2 && s.briefing.mineOutcomes.some((r) => r.kind === 'situation' && r.id === card.id && r.option === opt.id), 'briefing records the card answer');
+  ok(s.briefing.mineOutcomes.some((r) => r.kind === 'action' && r.id === 'strike'), 'briefing records the initiative');
+  ok(s.briefing.affecting + s.briefing.elsewhere >= 15 && s.briefing.affecting <= 8, `relevance filter: ${s.briefing.affecting} affecting, ${s.briefing.elsewhere} elsewhere`);
+  const briefText = await page.locator('#modal').innerText();
+  ok(!/d100|roll/i.test(briefText), 'briefing shows no dice');
+  await frameStats(page, OUT + 'briefing.png');
+  await click(page, '[data-act="continue"]');
+  s = await state(page);
+  ok(!s.ui.modalOpen && s.situations.length >= 1, `continued to turn 2 with ${s.situations.length} new cards: ${s.situations.map((x) => x.id).join(', ')}`);
   ok(page.errors.length === 0, `play path: no console errors ${JSON.stringify(page.errors)}`);
 
   // 4. Stills sweep: every actor in the registry, every named camera.
@@ -106,7 +118,8 @@ const click = async (page, sel) => {
   for (const actor of reg.actors) {
     await page.evaluate((a) => game.start(a, 11), actor);
     const st = await frameStats(page, OUT + `actor-${actor}.png`);
-    ok(st.mean > 5 && st.std > 5, `still: actor ${actor} (luma ${st.mean.toFixed(1)}, std ${st.std.toFixed(1)})`);
+    const cards = (await state(page)).situations.length;
+    ok(st.mean > 5 && st.std > 5 && cards >= 1, `still: actor ${actor} (luma ${st.mean.toFixed(1)}, std ${st.std.toFixed(1)}, ${cards} cards)`);
   }
   await page.evaluate(() => game.start('iran', 11));
   for (const cam of reg.cams) {
@@ -123,15 +136,14 @@ const click = async (page, sel) => {
   const page = await newPage();
   await page.goto(url + '/?dev=1&seed=3&play=saudi&auto=1&autodt=150');
   await page.waitForTimeout(10000);
-  const s = await page.evaluate(() => game.getState());
+  const s = await state(page);
   ok(s.simTime >= 3, `soak: sim advanced ${s.simTime} turns in 10 s (phase ${s.phase})`);
   ok(Object.values(s.world).every(Number.isFinite), 'soak: world values finite');
   ok(page.errors.length === 0 && s.errors.length === 0, `soak: no errors ${JSON.stringify(page.errors.concat(s.errors))}`);
   console.log(`      perf: lastTurnMs=${s.perf.lastTurnMs} frameMs=${s.perf.frameMs} dom=${s.perf.domNodes} svg=${s.perf.svgNodes}`);
   await frameStats(page, OUT + 'soak.png');
   if (s.phase === 'over') {
-    await page.evaluate(() => game.freeze());
-    await page.evaluate(() => game.cam('overview'));
+    await page.evaluate(() => { game.freeze(); game.cam('overview'); });
     await click(page, '[data-act="showEnd"]');
     ok(await page.locator('.verdict').isVisible(), 'end screen opens via mouse after the final turn');
     await frameStats(page, OUT + 'end.png');
