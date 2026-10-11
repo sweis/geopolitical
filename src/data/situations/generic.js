@@ -48,7 +48,7 @@ export const GENERIC = [
       if (patron) out.push(opt({
         id: 'appeal', label: `Appeal to ${h.short(patron)}`, text: `Ask your patron for air defenses, cash and a public warning to ${h.short(foe)}.`, cost: C(0, 0, 2),
         odds: 0.35, reasons: (h2) => [{ text: `${h2.short(patron)} relationship ${h2.relOf(patron)}`, d: h2.relOf(patron) / 400 }],
-        success: (h2) => { h2.res(h2.p, { military: 6, money: 4 }); h2.rel(h2.p, patron, 4); h2.rel(patron, foe, -6); h2.tension(h2.home ?? foeHome, -5); },
+        success: (h2) => { h2.res(h2.p, { military: 6, money: 4 }); h2.rel(h2.p, patron, 4); h2.rel(patron, foe, -6); const t = h2.home ?? foeHome; if (t) h2.tension(t, -5); },
         fail: (h2) => { h2.rel(h2.p, patron, -3); },
         say: { success: `${h.name(patron)} answered: deliveries, a public warning to ${h.short(foe)}, and a quiet promise of more.`, fail: `${h.name(patron)} offered sympathy and little else.` },
       }));

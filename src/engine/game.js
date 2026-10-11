@@ -15,9 +15,10 @@ import { goalScore, goalReport } from './goals.js';
 import { generateSituations, resolveSituations, compileBriefing, snapshotFor, impactSince, chooseOptionAI, proposals, ordersTotal } from './director.js';
 import { rand } from './rng.js';
 
-// Victory means materially improving your position: reach VICTORY_FLOOR, gain VICTORY_GAIN points over
-// your starting score, and fully meet at least half your objectives. Holding roughly steady is a draw.
-export const VICTORY_FLOOR = 68, VICTORY_GAIN = 22, DRAW_SLACK = 5;
+// Victory means materially improving your position: reach VICTORY_FLOOR and gain VICTORY_GAIN points
+// over your starting score. Meeting every objective after turn 6 ends the game decisively. Holding
+// roughly steady is a draw. (AI-played seats win about a third of the time at these values.)
+export const VICTORY_FLOOR = 75, VICTORY_GAIN = 28, DRAW_SLACK = 5;
 export function thresholds(s, id) {
   const start = Math.round(s.history[0]?.scores[id] ?? 0);
   const n = ACTOR_BY_ID[id].goals.length;
@@ -254,8 +255,8 @@ function checkEnd(s) {
     const th = thresholds(s, p);
     const met = rep.filter((g) => g.met).length;
     const tally = `${met} of ${rep.length} objectives fully met`;
-    s.outcome = sc >= th.victory && met >= th.metNeeded ? { result: 'victory', reason: `Score ${sc.toFixed(0)} (needed ${th.victory}); ${tally}.` }
-      : sc >= th.draw ? { result: 'draw', reason: `Muddling through: score ${sc.toFixed(0)}, ${tally}. Victory needed ${th.victory} and ${th.metNeeded} objectives.` }
+    s.outcome = sc >= th.victory ? { result: 'victory', reason: `Score ${sc.toFixed(0)} (needed ${th.victory}); ${tally}.` }
+      : sc >= th.draw ? { result: 'draw', reason: `Muddling through: score ${sc.toFixed(0)} (victory needed ${th.victory}); ${tally}.` }
       : { result: 'defeat', reason: `Your position deteriorated: score ${sc.toFixed(0)} (started at ${th.start}); ${tally}.` };
   }
 }

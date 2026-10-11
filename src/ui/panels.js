@@ -202,7 +202,7 @@ export function goalsHtml(s) {
   let h = '';
   if (s.player) {
     const def = ACTOR_BY_ID[s.player], th = thresholds(s, s.player), sc = goalScore(def, s);
-    h += `<h3>Your objectives</h3><p class="small muted">Score ${sc.toFixed(0)} (started ${th.start}). Victory at turn ${s.maxTurns} needs ≥ ${th.victory} and ${th.metNeeded} objectives fully met; ending below ${th.draw} is defeat. Meet every objective after turn 6 for an early decisive win.</p>`;
+    h += `<h3>Your objectives</h3><p class="small muted">Score ${sc.toFixed(0)} (started ${th.start}). Victory at turn ${s.maxTurns} needs ≥ ${th.victory}; ending below ${th.draw} is defeat. Meet every objective after turn 6 for an early decisive win.</p>`;
     h += goalReport(def, s).map((g) => `<div class="goal ${g.met ? 'met' : ''}"><div class="top"><span>${esc(g.name)} <span class="muted small">×${g.w}</span></span><span class="val">${g.value} → ${esc(g.target)}</span></div><div class="gbar"><i style="width:${Math.round(g.progress * 100)}%"></i></div></div>`).join('');
   }
   const sc = scores(s);
@@ -254,7 +254,7 @@ export function startHtml(s0, sel) {
     <div class="detail"><div><h2>${esc(def.name)}</h2><p>${esc(def.blurb)}</p>
       <div class="kv"><span>Treasury</span><span class="v">$${r.money}</span><span>Military</span><span class="v">${r.military}</span><span>Political capital</span><span class="v">${r.political}</span><span>Stability</span><span class="v">${r.stability}</span></div></div>
       <div><h2>Objectives</h2><ul>${def.goals.map((g) => `<li>${esc(g.name)} <span class="muted small">(${g.dir} ${g.unit === '$' ? '$' : ''}${g.thr}${g.unit === '%' ? '%' : ''}, weight ${g.w})</span></li>`).join('')}</ul>
-      <p class="small muted">Starting score ${th.start}. Victory needs ${th.victory} and ${th.metNeeded} objectives fully met by turn ${s0.maxTurns}.</p>
+      <p class="small muted">Starting score ${th.start}. Victory needs ${th.victory} by turn ${s0.maxTurns}; every objective met after turn 6 wins outright.</p>
       <div class="btnrow"><button class="primary" data-act="begin" data-id="${sel}">Play as ${esc(def.name)} →</button></div></div></div>
   </div>`;
 }
@@ -265,7 +265,7 @@ export function helpHtml() {
   <li><b>Situations.</b> The game master deals the cards that grew out of last turn: a crisis that must be answered, an opening you can take or leave, and intelligence on a rival's plan you can lobby for or against. Each option has a cost and an assessment of its odds; the reasons are a click away.</li>
   <li><b>Initiative.</b> One move of your own. Your advisers propose the moves that best serve your objectives right now; the full catalogue is there if you disagree. Other actors are expected to lobby for or against it.</li>
   <li><b>End turn.</b> Everything resolves at once. Outcomes are narrated, never rolled in front of you. The briefing shows only what mattered to you; the rest is a fold-out.</li></ol>
-  <h2>Winning</h2><p>Your score (0–100) is weighted progress on your objectives. Raise it by 22 points (minimum 68) and fully meet at least half your objectives by the last turn to win; meet every objective after turn 6 for a decisive early win; let your stability hit 0 and you collapse.</p>
+  <h2>Winning</h2><p>Your score (0–100) is weighted progress on your objectives. Raise it by 28 points (minimum 75) by the last turn to win; meet every objective after turn 6 for a decisive early win; let your stability hit 0 and you collapse.</p>
   <h2>Resources</h2><p><b>Treasury</b> and <b>military</b> pay for operations. <b>Political capital</b> pays for diplomacy and lobbying. <b>Stability</b> is your home front. The top bar shows only the tracks your objectives depend on.</p>
   <div class="btnrow"><button class="primary" data-act="closeModal">Back to the game</button></div></div>`;
 }

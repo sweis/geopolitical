@@ -14,6 +14,6 @@ for (const a of ACTORS) {
     row.push(`${{ victory: 'W', draw: 'D', defeat: 'L' }[s.outcome.result]}${goalScore(a, s).toFixed(0)}`);
   }
   const th = thresholds(newGame({ seed: 1, player: a.id }), a.id);
-  console.log(`${a.id.padEnd(13)} start ${th.start} need ${th.victory}/${th.metNeeded}  ${row.join(' ')}`);
+  console.log(`${a.id.padEnd(13)} start ${th.start} need ${th.victory}  ${row.join(' ')}`);
 }
 console.log(tally);
