@@ -5,6 +5,8 @@ import { THEATERS, THEATER_BY_ID, ANCHORS } from '../src/data/theaters.js';
 import { EVENTS, THRESHOLDS } from '../src/data/events.js';
 import { MAP_W, MAP_H, project } from '../src/data/map.js';
 import { ACTIONS, canUse } from '../src/engine/actions.js';
+import { forecast } from '../src/engine/rollout.js';
+import { setAIConfig } from '../src/engine/ai.js';
 import { newGame, autoTurn, scores, choose, setInitiative, endTurn, playerMenu, previewInitiative, proposals } from '../src/engine/game.js';
 import { evaluate } from '../src/engine/adjudicate.js';
 import { SITUATIONS } from '../src/data/situations/index.js';
@@ -91,6 +93,37 @@ for (const seed of [1, 2, 3]) {
   const fired = new Set(a.recent.map((r) => r.kind === 'situation' && r.id).filter(Boolean));
   ok(a.log.filter((l) => l.kind === 'success' || l.kind === 'fail').length > 0, 'log carries narrated results');
   ok(fired.size >= 1 || a.log.some((l) => l.actor === 'turkey'), 'the AI-played seat answered situation cards');
+}
+
+// Mixed strategies and forecasts (the policy simulator).
+{
+  const s = newGame({ seed: 3, player: 'us' });
+  const pols = Object.values(s.policies);
+  ok(pols.length >= 18 && pols.every((p) => Math.abs(p.reduce((n, x) => n + x.w, 0) - 1) < 1e-3), 'every live actor has a mixed strategy whose weights sum to 1');
+  ok(pols.every((p) => new Set(p.map((x) => `${x.action}|${x.target}`)).size === p.length), 'strategies list distinct moves (no commit duplicates)');
+  const snap = () => JSON.stringify({ w: s.world, a: s.actors, f: s.flags, r: s.rng, sit: s.situations.map((x) => x.choice), rec: s.recent.length });
+  const before = snap();
+  const t0 = performance.now();
+  const f1 = forecast(s, { n: 8, player: 'hold' });
+  const ms = performance.now() - t0;
+  ok(before === snap(), 'forecast leaves the game state untouched');
+  ok(f1.n === 8 && f1.bands.length === s.maxTurns + 1 && f1.outcome.complete === 1 && Math.abs(f1.outcome.victory + f1.outcome.draw + f1.outcome.defeat - 1) < 1e-9, `forecast shape: ${f1.n} games, ${f1.bands.length} bands, outcomes sum to 1 (${ms.toFixed(0)} ms)`);
+  ok(f1.goals.length === 5 && f1.ends.length >= 3 && f1.final.p10 <= f1.final.p50 && f1.final.p50 <= f1.final.p90 && f1.winners.length >= 1, 'forecast carries objectives, end states, winners and ordered score quantiles');
+  ok(JSON.stringify(forecast(s, { n: 8, player: 'hold' })) === JSON.stringify(f1), 'forecast is deterministic for the same board');
+  setInitiative(s, 'massiveBombing', 'nuclearSites', 0);
+  const f2 = forecast(s, { n: 8, player: 'orders' });
+  ok(JSON.stringify(f2.means) !== JSON.stringify(f1.means), 'orders change the forecast');
+  ok(f2.ends.every((e) => [-1, 0, 1].includes(e.good)) && f2.ends.some((e) => e.good !== 0), 'end states are colored by the player\'s objectives');
+  // Rollout-improved AI: deterministic, carries values, affordable.
+  setAIConfig({ rollouts: 2, horizon: 2 });
+  const t1 = performance.now();
+  const a = newGame({ seed: 5, player: 'israel' }); autoTurn(a); autoTurn(a);
+  const per = (performance.now() - t1) / 3;
+  const b = newGame({ seed: 5, player: 'israel' }); autoTurn(b); autoTurn(b);
+  ok(JSON.stringify(a.world) === JSON.stringify(b.world) && JSON.stringify(a.policies) === JSON.stringify(b.policies), 'rollout-improved AI replays identically');
+  ok(Object.values(a.policies).some((p) => p.some((x) => x.value != null)), 'improved strategies carry rollout values');
+  ok(per < 2500, `turn start with rollouts: ${per.toFixed(0)} ms`);
+  setAIConfig({ rollouts: 0 });
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nall engine checks passed');

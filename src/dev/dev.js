@@ -19,7 +19,9 @@ import { goalReport } from '../engine/goals.js';
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { tension } from '../engine/state.js';
 import { drawArcs, flash } from '../ui/mapView.js';
+import { forecast } from '../engine/rollout.js';
 
+const brief = (f) => (f ? { n: f.n, win: f.outcome.victory, draw: f.outcome.draw, defeat: f.outcome.defeat, final: f.final, ends: f.ends.slice(0, 6).map((e) => [e.id, +e.p.toFixed(2)]) } : null);
 export function installDev(app, { startGame, render, autoStep, showStart, afterTurn }) {
   const params = new URLSearchParams(location.search);
   const autodt = +(params.get('autodt') ?? 1200);
@@ -55,6 +57,8 @@ export function installDev(app, { startGame, render, autoStep, showStart, afterT
         ui: { tab: app.ui.tab, action: app.ui.action, target: app.ui.target, commit: app.ui.commit, cam: app.map.cam, modalOpen: !document.getElementById('modal').hidden, overlay: app.ui.overlay },
         perf: { frameMs: +frame.ms.toFixed(2), lastTurnMs: app.metrics.lastTurnMs, renders: app.metrics.renders, domNodes: document.getElementsByTagName('*').length, svgNodes: document.querySelectorAll('#map *').length, drawCalls: null, shaderPrograms: null, renderer: rendererString, contextLost: false },
         errors: [...app.errors], autoplay: !!timer, simTime: s.history.length - 1,
+        policies: s.policies ? Object.fromEntries(Object.entries(s.policies).map(([id, pol]) => [id, pol.map((x) => ({ action: x.action, target: x.target, w: x.w }))])) : null,
+        forecast: { running: !!app.fc?.running, hasOrders: !!app.fc?.hasOrders, history: app.fc?.history.length ?? 0, hold: brief(app.fc?.hold), orders: brief(app.fc?.orders), count: app.metrics.forecasts || 0, lastMs: app.metrics.lastForecastMs ?? null },
       };
     },
     start(actor = 'us', seed = app.s.seed) { startGame(actor === 'observer' ? null : actor, seed); return game.getState().player; },
@@ -82,6 +86,7 @@ export function installDev(app, { startGame, render, autoStep, showStart, afterT
     endTurn() { endTurn(app.s); afterTurn?.(); render(); return app.s.turn; },
     preview(action, target = null, commit = 0) { return previewInitiative(app.s, action, target, commit); },
     proposals() { return proposals(app.s); },
+    forecast(opts = {}) { return forecast(app.s, opts); },
     showStart,
     registry: { actors: ACTORS.map((a) => a.id), theaters: THEATERS.map((t) => t.id), events: EVENTS.map((e) => e.id), cams: ['overview', 'levant', 'gulf', 'hero-close', 'hud-check'] },
   };

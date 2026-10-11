@@ -166,9 +166,10 @@ export const GROUPS = [
     title: 'The technocrats are gaining ground',
     text: () => 'The committee that runs reconstruction now controls the crossings, the payroll and the police academy. It is popular. It is also the thing that replaces you.',
     options: (h) => [
-      opt({ id: 'coopt', label: 'Co-opt it', text: 'Your people in its offices, your contractors on its lists.', cost: C(4, 0, 1), success: (h2) => { h2.res('hamas', { stability: 6, money: 3 }); h2.W('hamasDisarm', 3); }, say: { success: 'The committee hired your engineers and your cousins.' }, default: true }),
+      opt({ id: 'coopt', label: 'Co-opt it', text: 'Your people in its offices, your contractors on its lists.', cost: C(4, 0, 1), success: (h2) => { h2.res('hamas', { stability: 6, money: 3 }); h2.W('hamasDisarm', 3); }, say: { success: 'The committee hired your engineers and your cousins.' } }),
       opt({ id: 'undermine', label: 'Undermine it', text: 'Strikes, leaks and a few disappearances of its files.', cost: C(1, 0, 1), success: (h2) => { h2.res('hamas', { stability: -2 }); h2.W('humanitarian', -4); h2.W('hamasDisarm', -3); h2.W('gazaCeasefire', -3); }, say: { success: 'The committee lost a month and some credibility.' } }),
       opt({ id: 'cooperate', label: 'Cooperate fully', text: 'Become a party, not a government.', cost: C(0, 0, 2), success: (h2) => { h2.res('hamas', { stability: 3, political: 2 }); h2.W('hamasDisarm', 6); h2.W('humanitarian', 3); h2.rel('hamas', 'egypt', 8); h2.rel('hamas', 'turkey', 6); }, say: { success: 'Hamas ministers resigned; Hamas councillors were elected.' } }),
+      opt({ id: 'watch', label: 'Watch it grow', text: 'Keep your guns and your silence.', success: (h2) => { h2.res('hamas', { stability: -1 }); h2.W('hamasDisarm', 1); }, say: { success: 'The committee grew; so did the talk of who really runs Gaza.' }, default: true }),
     ],
   },
   {

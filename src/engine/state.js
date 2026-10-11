@@ -19,7 +19,7 @@ export function createState({ seed = 1, player = null, maxTurns = MAX_TURNS } = 
     world: { ...WORLD_START },
     actors: {}, theaters: {}, rel: {},
     // Per-turn working set: AI declarations, the player's situation cards and orders.
-    declared: {}, argUsed: {}, situations: [], orders: { initiative: null },
+    declared: {}, argUsed: {}, situations: [], orders: { initiative: null }, policies: {}, model: null,
     // What happened: this turn's results and events, the relevance-filtered briefing, and a short
     // structured memory of recent results that situations and AI grudges read.
     results: [], news: [], briefing: null, recent: [], cool: {}, fatigue: {},

@@ -3,6 +3,8 @@ import { ACTOR_BY_ID } from './data/actors.js';
 import { ACTION_BY_ID } from './engine/actions.js';
 import { newGame, choose, setInitiative, clearInitiative, endTurn, autoTurn, proposals } from './engine/game.js';
 import { impactLine } from './engine/director.js';
+import { createForecast, planOf } from './engine/rollout.js';
+import { setAIConfig } from './engine/ai.js';
 import { rel } from './engine/state.js';
 import { createMap, renderMap, drawArcs, drawHappenings, drawPins, flash } from './ui/mapView.js';
 import * as P from './ui/panels.js';
@@ -14,8 +16,13 @@ import { installDev } from './dev/dev.js';
 const $ = (sel) => document.querySelector(sel);
 const params = new URLSearchParams(location.search);
 
+// Forecasts: many simulated games from the current board, computed in the background in time slices.
+// `hold` is recomputed once per turn (the player holds); `orders` whenever the queued orders change.
+const FC = { n: +(params.get('runs') ?? 20), hold: null, orders: null, running: null, hasOrders: false, history: [], key: null, ordersKey: null, pending: null, pendingSig: null, token: 0, timer: null, lastRender: 0 };
+P.VIEW.fc = FC;
+
 export const app = {
-  s: null,
+  s: null, fc: FC,
   ui: { tab: 'command', cat: 'all', action: null, target: undefined, commit: 0, selectedTheater: null, targetable: new Set(), startPick: 'us', showAll: false, why: new Set(), expanded: new Set(), proposals: null, overlay: null, pop: null, hap: {}, top: [] },
   metrics: { lastTurnMs: 0, renders: 0 },
   errors: [],
@@ -33,6 +40,8 @@ function scrollTop() {
 }
 
 export function startGame(player, seed = +(params.get('seed') ?? Date.now() % 100000)) {
+  cancelForecast();
+  Object.assign(FC, { hold: null, orders: null, hasOrders: false, history: [], key: null, ordersKey: null });
   app.s = newGame({ seed, player });
   resetTurnUi();
   app.ui.tab = 'command';
@@ -60,7 +69,7 @@ export function render() {
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === ui.tab);
   const panel = $('#panel');
   const scroll = panel.scrollTop;
-  panel.innerHTML = ui.tab === 'command' ? P.commandHtml(s, ui) : ui.tab === 'goals' ? P.goalsHtml(s) : ui.tab === 'intel' ? P.intelHtml(s, ui) : P.logHtml(s);
+  panel.innerHTML = ui.tab === 'command' ? P.commandHtml(s, ui) : ui.tab === 'futures' ? P.futuresHtml(s, ui) : ui.tab === 'goals' ? P.goalsHtml(s) : ui.tab === 'intel' ? P.intelHtml(s, ui) : P.logHtml(s);
   panel.scrollTop = scroll;
   ui.targetable = new Set();
   if (s.phase === 'turn' && s.player && ui.action && !s.orders.initiative && ACTION_BY_ID[ui.action].target === 'theater')
@@ -74,6 +83,64 @@ export function render() {
   $('#tickerText').textContent = latest;
   if (ui.pop) renderPop();
   if (!$('#mapTop')) renderStrip();
+  requestForecast();
+}
+
+// ── forecasts ──
+const ordersSig = (s) => JSON.stringify([s.orders.initiative, s.situations.map((x) => x.choice)]);
+const hasOrders = (s) => !!s.orders.initiative || s.situations.some((x) => x.choice != null && !x.options.find((o) => o.id === x.choice)?.default);
+function cancelForecast() { clearTimeout(FC.timer); FC.timer = null; FC.token++; FC.running = null; FC.pending = null; FC.pendingSig = null; }
+function requestForecast() {
+  const s = app.s;
+  if (!s?.player || s.phase !== 'turn' || params.has('noforecast')) { cancelForecast(); return; }
+  const key = `${s.seed}|${s.turn}`;
+  if (FC.key !== key) { cancelForecast(); FC.key = key; FC.hold = null; FC.orders = null; FC.ordersKey = null; }
+  FC.hasOrders = hasOrders(s);
+  const sig = FC.hasOrders ? ordersSig(s) : null;
+  const want = [];
+  if (!FC.hold) want.push('hold');
+  if (sig && FC.ordersKey !== sig) want.push('orders');
+  if (!want.length) { if (FC.pending?.includes('orders') && FC.pendingSig !== sig) cancelForecast(); return; }
+  if (FC.pending && FC.pendingSig === sig && want.every((k) => FC.pending.includes(k))) return; // already on it
+  cancelForecast();
+  FC.pending = want; FC.pendingSig = sig;
+  FC.timer = setTimeout(() => runForecasts([...want], sig), 200);
+}
+function runForecasts(jobs, sig) {
+  const s = app.s, token = ++FC.token;
+  const plan = planOf(s);
+  const next = () => {
+    const kind = jobs.shift();
+    if (!kind) { FC.running = null; FC.pending = null; FC.pendingSig = null; renderOutlook(); return; }
+    const fc = createForecast(s, plan, { n: FC.n, player: kind });
+    FC.running = { kind, done: 0, n: FC.n };
+    const started = performance.now();
+    const tick = () => {
+      if (token !== FC.token) return;
+      const t0 = performance.now();
+      let more = true;
+      while (more && performance.now() - t0 < 20) more = fc.step();
+      FC.running = { kind, done: fc.done, n: FC.n };
+      if (more) { if (app.ui.tab === 'futures' && performance.now() - FC.lastRender > 300) renderOutlook(); setTimeout(tick, 0); return; }
+      FC[kind] = fc.summary();
+      if (kind === 'orders') FC.ordersKey = sig;
+      app.metrics.forecasts = (app.metrics.forecasts || 0) + 1;
+      app.metrics.lastForecastMs = Math.round(performance.now() - started);
+      next();
+    };
+    setTimeout(tick, 0);
+  };
+  next();
+}
+function renderOutlook() {
+  FC.lastRender = performance.now();
+  if (app.s.phase === 'turn') render();
+  const line = $('#outlookLine');
+  if (line) line.innerHTML = P.outlookLineHtml();
+}
+function recordOutlook() {
+  const s = app.s, cur = FC.hasOrders && FC.orders ? FC.orders : FC.hold;
+  if (cur) FC.history.push({ turn: s.turn, win: cur.outcome.victory, draw: cur.outcome.draw, defeat: cur.outcome.defeat, p10: cur.final.p10, p50: cur.final.p50, p90: cur.final.p90 });
 }
 
 function openModal(html) { const m = $('#modal'); m.innerHTML = html; m.hidden = false; m.scrollTop = 0; }
@@ -212,6 +279,8 @@ function setCommit(i) {
 
 function doEndTurn() {
   const s = app.s;
+  recordOutlook();
+  cancelForecast();
   busy(() => {
     endTurn(s);
     afterTurn();
@@ -233,6 +302,8 @@ function busy(fn) {
 
 export function autoStep() {
   const t0 = performance.now();
+  recordOutlook();
+  cancelForecast();
   autoTurn(app.s);
   app.metrics.lastTurnMs = Math.round(performance.now() - t0);
   afterTurn();
@@ -255,6 +326,7 @@ function onPanelClick(e) {
     case 'commit': setCommit(+id); break;
     case 'noInit': clearInitiative(s); ui.action = null; render(); break;
     case 'endTurn': doEndTurn(); break;
+    case 'futures': ui.tab = 'futures'; render(); break;
     case 'briefing': showBriefing(); break;
     case 'showEnd': openModal(P.endHtml(s)); break;
   }
@@ -310,6 +382,9 @@ function boot() {
   $('#panel').addEventListener('keydown', onPanelKey);
   $('#modal').addEventListener('click', onModalClick);
   $('#tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { app.ui.tab = b.dataset.tab; render(); } });
+  $('#clock').addEventListener('click', (e) => { if (e.target.closest('[data-act="futures"]')) { app.ui.tab = 'futures'; render(); } });
+  // Actors test their best moves a couple of turns ahead against everyone else (?ai=shallow for one-ply).
+  if (params.get('ai') !== 'shallow') setAIConfig({ rollouts: 6, horizon: 2 });
   $('#btnHelp').addEventListener('click', () => openModal(P.helpHtml()));
   for (const b of document.querySelectorAll('[data-cam]')) b.addEventListener('click', () => { app.map.setCam(b.dataset.cam, app.s.player); if (app.ui.pop) renderPop(); });
   window.addEventListener('resize', () => { if (app.ui.pop) renderPop(); });

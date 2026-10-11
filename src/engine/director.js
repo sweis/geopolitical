@@ -31,7 +31,8 @@ const withIds = (opts) => { opts.forEach((o, i) => { if (o.id == null) o.id = `o
 // The live option objects (with their effect closures) dealt this turn, keyed by game and card, so
 // resolution and AI lookahead use exactly the options the player saw even if the state has moved.
 const LIVE = new Map();
-const liveKey = (s, sitId) => `${s.seed}|${s.player}|${s.turn}|${sitId}`;
+const liveKey = (s, sitId) => `${s.simTag ?? 'main'}|${s.turn}|${sitId}`;
+export function clearLive(tag) { const prefix = `${tag}|`; for (const k of [...LIVE.keys()]) if (k.startsWith(prefix)) LIVE.delete(k); }
 
 // ── expected effects (what a success would do), shown as chips instead of prose ──
 // Direction of "good" for each world track from the player's objectives: +1 wants it up, -1 down, 0 neutral.
@@ -99,7 +100,7 @@ function materialize(s, p, def, h) {
     const cost = o.cost ?? { money: 0, military: 0, political: 0 };
     return { id: o.id, label: o.label, text: o.text ?? '', cost, p: pFinal, band: auto ? null : band(pFinal), base: o.odds ?? null,
       reasons: reasons.map((r) => ({ text: r.text, d: +r.d.toFixed(3) })), default: !!o.default, affordable: canAfford(s, p, cost), action: o.action ?? null, target: o.target ?? null,
-      icon: o.icon ?? null, effects: optionEffects(s, p, o, cost) };
+      icon: o.icon ?? null, effects: s.simTag ? [] : optionEffects(s, p, o, cost) };
   });
   if (!options.some((o) => o.default)) options[options.length - 1].default = true;
   const at = str(def.at, h) ?? null;
@@ -124,7 +125,7 @@ export function eligibleSituations(s) {
 export function generateSituations(s) {
   const p = s.player;
   s.situations = [];
-  LIVE.clear();
+  clearLive(s.simTag ?? 'main');
   if (!p || s.actors[p].collapsed) return;
   const eligible = eligibleSituations(s);
   const pickTop = (arr) => {
@@ -221,7 +222,7 @@ export function impactSince(s, p, before) {
 }
 
 function liveOptions(s, sit) {
-  const cached = LIVE.get(liveKey(s, sit.id));
+  const cached = LIVE.get(liveKey(s, sit.id)) ?? (s.simTag ? LIVE.get(`main|${s.turn}|${sit.id}`) : null);
   if (cached) return cached;
   const def = SITUATION_BY_ID[sit.id];
   try { return withIds(def.options(makeHelpers(s, s.player))); } catch (e) { report('options', sit.id, e); return []; }

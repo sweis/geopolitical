@@ -5,11 +5,19 @@ import { ACTIONS, ACTION_BY_ID, canUse, affordable, COMMIT, costOf } from './act
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { goalScore } from './goals.js';
 import { simClone as clone } from './state.js';
-import { evaluate, payCost, applyOutcome } from './adjudicate.js';
+import { evaluate, payCost, applyOutcome, clampP } from './adjudicate.js';
 import { rand, pick } from './rng.js';
-import { hitBy, homeOf, rel } from './state.js';
+import { hitBy, homeOf, rel, alive } from './state.js';
 
-const TEMPERATURE = 0.6;
+// Search settings. rollouts=0 is the one-ply AI (fast: sims and tests); the browser enables rollouts so
+// each actor tests its top candidates a few turns ahead against everyone else's policies.
+// k: candidates per actor; rollouts × horizon: simulated games per candidate and their length;
+// temperature: softmax over one-ply gains; rolloutTemperature: softmax over rollout utilities (a wider
+// scale, since those include everyone's replies); iterations: re-run with the improved opponents' policies.
+// anchor/clamp: rollout results adjust the one-ply gain by anchor × (value − mean), the difference clamped
+// to ±clamp utility points, so a few chaotic rollouts nudge a strategy rather than hijack it.
+export const AI_CONFIG = { k: 4, rollouts: 0, horizon: 2, iterations: 1, temperature: 0.6, rolloutTemperature: 1.5, anchor: 0.25, clamp: 4, modelSize: 10 };
+export function setAIConfig(o) { Object.assign(AI_CONFIG, o); return AI_CONFIG; }
 const GRUDGE_BONUS = 2.5;
 export const ARGUE_THRESHOLD = 1.0;
 const MAX_ARGS_PER_ACTOR = 2;
@@ -98,17 +106,153 @@ function leaderBias(s, a, c) {
   return hits ? Math.min(4, lead / 6) : 0;
 }
 
-export function chooseAction(s, a) {
-  const base = utility(s, a);
-  const scored = candidates(s, a).map((c) => ({ ...c, ev: expectedGain(s, a, c, base) + grudgeBonus(s, a, c) + flagBias(s, a, c) + leaderBias(s, a, c) }));
-  if (!scored.length) return null;
-  scored.sort((x, y) => y.ev - x.ev);
-  const top = scored.slice(0, 6);
-  const wts = top.map((c) => Math.exp((c.ev - top[0].ev) / TEMPERATURE));
-  let r = rand(s) * wts.reduce((n, w) => n + w, 0);
-  for (let i = 0; i < top.length; i++) { r -= wts[i]; if (r <= 0) return top[i]; }
-  return top[0];
+// ── one-ply scoring that records what each move does, so rollouts can re-score moves on later boards ──
+const RES4 = ['money', 'military', 'political', 'stability'];
+// Sparse difference between two states in everything utilities and goals read.
+export function diffOf(s, after) {
+  const world = {}, actors = {}, infl = {}, relD = {};
+  for (const k in s.world) { const d = after.world[k] - s.world[k]; if (d) world[k] = d; }
+  for (const id in s.actors) {
+    const a = s.actors[id], b = after.actors[id]; let o = null;
+    for (const k of RES4) { const d = b[k] - a[k]; if (d) (o ??= {})[k] = d; }
+    if (b.collapsed !== a.collapsed) (o ??= {}).collapsed = b.collapsed;
+    if (o) actors[id] = o;
+  }
+  for (const t in s.theaters) {
+    const a = s.theaters[t].infl, b = after.theaters[t].infl; let o = null;
+    for (const id in b) { const d = (b[id] || 0) - (a[id] || 0); if (d) (o ??= {})[id] = d; }
+    for (const id in a) if (!(id in b) && a[id]) (o ??= {})[id] = -a[id];
+    if (o) infl[t] = o;
+  }
+  for (const k in after.rel) { const d = (after.rel[k] || 0) - (s.rel[k] || 0); if (d) relD[k] = d; }
+  return { world, actors, infl, rel: relD };
 }
+// What each actor's utility reads beyond world tracks and its own resources: influence maps and
+// relations only when one of its goals does (read off the getters' source once).
+const NEEDS = {};
+function needsOf(id) {
+  if (!NEEDS[id]) {
+    let infl = false, relN = false, others = false;
+    for (const g of ACTOR_BY_ID[id].goals) { const src = g.get.toString(); if (src.includes('theaters')) infl = true; if (src.includes('rel(')) relN = true; if (g.get.actor && g.get.actor !== id) others = true; if (!g.get.world && !g.get.actor && !g.get.theater && src.includes('actors')) others = true; }
+    NEEDS[id] = { infl, rel: relN, others };
+  }
+  return NEEDS[id];
+}
+// A cheap read-only view of `s` with a diff applied (plus an extra cost for the actor), for utility().
+// Only the parts the actor's utility reads are overlaid.
+export function overlay(s, diff, id, extra = null) {
+  const need = needsOf(id);
+  const world = { ...s.world }; for (const k in diff.world) world[k] += diff.world[k];
+  const actors = { ...s.actors };
+  const own = diff.actors[id];
+  if (own || extra) { const o = { ...s.actors[id] }; if (own) for (const k in own) o[k] = k === 'collapsed' ? own[k] : o[k] + own[k]; if (extra) { o.money -= extra.money || 0; o.military -= extra.military || 0; o.political -= extra.political || 0; } actors[id] = o; }
+  if (need.others) for (const aid in diff.actors) { if (aid === id) continue; const o = { ...s.actors[aid] }, d = diff.actors[aid]; for (const k in d) o[k] = k === 'collapsed' ? d[k] : o[k] + d[k]; actors[aid] = o; }
+  let theaters = s.theaters;
+  if (need.infl) for (const t in diff.infl) { if (theaters === s.theaters) theaters = { ...s.theaters }; const d = diff.infl[t], io = { ...s.theaters[t].infl }; for (const k in d) io[k] = (io[k] || 0) + d[k]; theaters[t] = { ...s.theaters[t], infl: io }; }
+  let relm = s.rel;
+  if (need.rel) for (const k in diff.rel) { if (relm === s.rel) relm = { ...s.rel }; relm[k] = (relm[k] || 0) + diff.rel[k]; }
+  return { world, actors, theaters, rel: relm, flags: s.flags, turn: s.turn, player: s.player };
+}
+const NO_DIFF = { world: {}, actors: {}, infl: {}, rel: {} };
+const HOLD_ENTRY = { action: 'hold', target: null, commit: 0, cat: 'domestic', win: NO_DIFF, lose: NO_DIFF, extra: null };
+
+// Every affordable (action, target) scored by one-ply lookahead at commit 0; the higher commitment
+// levels are scored in closed form from the same two outcomes (their extra cost and odds bonus).
+export function scoreCandidates(s, a) {
+  const base = utility(s, a);
+  const out = [];
+  for (const act of ACTIONS) {
+    if (!canUse(act, a) || !affordable(s, a, act, 0)) continue;
+    const cost0 = costOf(act, 0);
+    for (const target of act.targets(s, a)) {
+      const c0 = { action: act.id, target, commit: 0 };
+      const { p } = evaluate(s, a, act.id, target, 0);
+      const win = clone(s); payCost(win, a, act.id, 0); applyOutcome(win, a, act.id, target, 'success');
+      const lose = clone(s); payCost(lose, a, act.id, 0); applyOutcome(lose, a, act.id, target, 'fail');
+      const uw = utility(win, a), ul = utility(lose, a);
+      const bias = grudgeBonus(s, a, c0) + flagBias(s, a, c0) + leaderBias(s, a, c0);
+      const dw = diffOf(s, win), dl = diffOf(s, lose);
+      out.push({ action: act.id, target, commit: 0, cost: cost0, p, ev: p * uw + (1 - p) * ul - base + bias, win: dw, lose: dl, extra: null, cat: act.cat });
+      for (let k = 1; k < COMMIT.length; k++) {
+        if (!affordable(s, a, act, k)) continue;
+        const ck = costOf(act, k);
+        const extra = { money: ck.money - cost0.money, military: ck.military - cost0.military, political: ck.political - cost0.political };
+        const pk = clampP(p + COMMIT[k].bonus);
+        const ev = pk * utility(overlay(s, dw, a, extra), a) + (1 - pk) * utility(overlay(s, dl, a, extra), a) - base + bias;
+        out.push({ action: act.id, target, commit: k, cost: ck, p: pk, ev, win: dw, lose: dl, extra, cat: act.cat });
+      }
+    }
+  }
+  return out;
+}
+const byEv = (x, y) => y.ev - x.ev;
+// One entry per (action, target): the best commitment level. Commit variants of one move are not
+// distinct strategies, and keeping them would crowd out real alternatives.
+function dedupe(sorted) {
+  const seen = new Set();
+  return sorted.filter((c) => { const key = `${c.action}|${c.target}`; if (seen.has(key)) return false; seen.add(key); return true; });
+}
+export function softmax(top, temperature) {
+  if (!top.length) return [];
+  const wts = top.map((c) => Math.exp((c.ev - top[0].ev) / temperature));
+  const z = wts.reduce((n, w) => n + w, 0);
+  return top.map((c, i) => ({ action: c.action, target: c.target, commit: c.commit, ev: +c.ev.toFixed(2), w: wts[i] / z }));
+}
+
+// Top-k candidates with softmax weights: the actor's mixed strategy before any lookahead.
+export function rootPolicy(s, a, k = AI_CONFIG.k, scored = scoreCandidates(s, a)) {
+  return softmax(dedupe([...scored].sort(byEv)).slice(0, k), AI_CONFIG.temperature);
+}
+
+// The rollout model: the actor's best moves (plus the best of each category, and holding) with their
+// recorded effects, re-scored against whatever board a rollout reaches.
+function rolloutModel(scored, n = AI_CONFIG.modelSize) {
+  const sorted = dedupe([...scored].sort(byEv));
+  const out = sorted.slice(0, n);
+  for (const cat of ['military', 'diplomatic', 'economic', 'covert', 'domestic']) { const best = sorted.find((c) => c.cat === cat); if (best && !out.includes(best)) out.push(best); }
+  return out.map((c) => ({ action: c.action, target: c.target, commit: c.commit, cat: c.cat, win: c.win, lose: c.lose, extra: c.extra })).concat([HOLD_ENTRY]);
+}
+
+// Everyone's mixed strategy and rollout model for this board.
+export function rootPlan(s, k = AI_CONFIG.k) {
+  const policies = {}, model = {};
+  for (const id of alive(s)) { const scored = scoreCandidates(s, id); policies[id] = rootPolicy(s, id, k, scored); model[id] = rolloutModel(scored); }
+  return { turn: s.turn, policies, model };
+}
+
+// A policy for a later board, from the recorded model: each move's effects are applied to the current
+// board in a cheap overlay (no cloning), with current odds, grudges and flags. Validity of targets is
+// left to the sampler. This is what makes simulated actors adapt as the game moves on.
+export function fastPolicy(c, a, entries, k = AI_CONFIG.k) {
+  if (!entries?.length) return [];
+  const base = utility(c, a);
+  const scored = [];
+  for (const e of entries) {
+    let ev = 0;
+    if (e.action !== 'hold') {
+      const act = ACTION_BY_ID[e.action];
+      if (!affordable(c, a, act, e.commit)) continue;
+      let p; try { p = evaluate(c, a, e.action, e.target, e.commit).p; } catch { continue; }
+      ev = p * utility(overlay(c, e.win, a, e.extra), a) + (1 - p) * utility(overlay(c, e.lose, a, e.extra), a) - base + grudgeBonus(c, a, e) + flagBias(c, a, e) + leaderBias(c, a, e);
+    }
+    scored.push({ action: e.action, target: e.target, commit: e.commit, ev });
+  }
+  return softmax(scored.sort(byEv).slice(0, k), AI_CONFIG.temperature);
+}
+
+// Sample a move from a policy (the actor's mixed strategy). Deterministic given the state's RNG.
+export function sampleMove(s, policy) {
+  if (!policy?.length) return null;
+  let r = rand(s) * policy.reduce((n, x) => n + x.w, 0);
+  for (const x of policy) { r -= x.w; if (r <= 0) return x; }
+  return policy[policy.length - 1];
+}
+
+export function chooseAction(s, a) {
+  return sampleMove(s, rootPolicy(s, a, 6));
+}
+// Public shape of a policy for the state/UI: probabilities rounded, values kept.
+export const packPolicy = (pol) => pol.map((x) => ({ action: x.action, target: x.target, commit: x.commit, w: +x.w.toFixed(4), ev: x.ev, value: x.value ?? null }));
 
 // How much each actor gains (positive) or loses if this declaration succeeds.
 export function stakes(s, decl) {

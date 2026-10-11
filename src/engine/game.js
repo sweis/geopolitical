@@ -10,7 +10,8 @@ import { EVENTS, EVENT_BY_ID, SCRIPTED, THRESHOLDS } from '../data/events.js';
 import { ACTION_BY_ID, affordable, canUse, ACTIONS } from './actions.js';
 import { createState, clamp, deriveWorld, W, res, alive, dateOf, infl, homeOf, rel } from './state.js';
 import { resolve as resolveDecl, evaluate, band, payCost } from './adjudicate.js';
-import { chooseAction, aiArguments, planArgs } from './ai.js';
+import { chooseAction, aiArguments, planArgs, sampleMove, packPolicy, rootPlan, AI_CONFIG } from './ai.js';
+import { improvePolicies } from './rollout.js';
 import { FORCE } from './consequences.js';
 import { goalScore, goalReport } from './goals.js';
 import { generateSituations, resolveSituations, compileBriefing, snapshotFor, impactSince, chooseOptionAI, proposals, ordersTotal } from './director.js';
@@ -41,9 +42,16 @@ export function beginTurn(s, first = false) {
   if (!first) s.turn += 1;
   // results/news keep last turn's record for the map and briefing; endTurn clears them before resolving.
   s.declared = {}; s.argUsed = {}; s.orders = { initiative: null };
+  // Every actor's mixed strategy: top candidates by one-ply gain, re-weighted by short rollouts when
+  // enabled (each actor tests its candidates against everyone else's strategies). The rollout model
+  // (what each move does) stays on the state for forecasts.
+  const plan = rootPlan(s);
+  if (AI_CONFIG.rollouts > 0) plan.policies = improvePolicies(s, plan);
+  s.policies = Object.fromEntries(Object.entries(plan.policies).map(([id, pol]) => [id, packPolicy(pol)]));
+  s.model = plan.model;
   for (const id of alive(s)) {
     if (id === s.player) continue;
-    const c = chooseAction(s, id);
+    const c = sampleMove(s, plan.policies[id]);
     if (c) s.declared[id] = { actor: id, action: c.action, target: c.target, commit: c.commit, args: [] };
   }
   aiArguments(s, Object.values(s.declared), s.player); // AI actors argue among themselves; also computes stakes
@@ -151,14 +159,14 @@ export function autoTurn(s) {
   const p = s.player;
   if (p && !s.actors[p].collapsed) {
     for (const sit of s.situations) sit.choice = chooseOptionAI(s, p, sit);
-    const c = chooseAction(s, p);
+    const c = s.policies?.[p]?.length ? sampleMove(s, s.policies[p]) : chooseAction(s, p);
     if (c && c.action !== 'hold') { try { setInitiative(s, c.action, c.target, c.commit); } catch { /* leave as hold */ } }
   }
   endTurn(s);
 }
 
 // ── upkeep ──
-function upkeep(s) {
+export function upkeep(s) {
   const w = s.world;
   for (const def of ACTORS) {
     const a = s.actors[def.id];
@@ -262,7 +270,7 @@ export function scores(s) {
   return Object.fromEntries(ACTORS.map((a) => [a.id, +goalScore(a, s).toFixed(1)]));
 }
 
-function checkEnd(s) {
+export function checkEnd(s) {
   const p = s.player;
   if (!p) { if (s.turn >= s.maxTurns) s.outcome = { result: 'complete', reason: 'Simulation complete.' }; return; }
   const me = s.actors[p];

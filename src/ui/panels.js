@@ -10,6 +10,8 @@ import { playerMenu, previewInitiative, thresholds, scores, ordersTotal } from '
 import { actionEffects } from '../engine/director.js';
 import { icon, actionIcon, optionIcon, KIND_ICON, OUTCOME_ICON } from './icons.js';
 
+// The forecast view (set by the controller): { hold, orders, running, hasOrders, history }.
+export const VIEW = { fc: null };
 export const esc = (x) => String(x ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sign = (d) => (d > 0 ? `+${Math.round(d * 100)}` : `${Math.round(d * 100)}`);
 const fmtDate = (iso) => new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).toUpperCase();
@@ -175,7 +177,7 @@ function ordersHtml(s, ui) {
   const t = ordersTotal(s), a = s.actors[s.player];
   const over = t.money > a.money || t.military > a.military || t.political > a.political;
   const unanswered = s.situations.filter((x) => !x.choice).length;
-  return `<div class="orders ${over ? 'over' : ''}"><div class="small">${costHtml(t)}${over ? '<div class="down">Over budget</div>' : ''}${unanswered ? `<div class="muted">${unanswered} unanswered</div>` : ''}</div>
+  return `<div class="orders ${over ? 'over' : ''}"><div class="ocol">${outlookHtml()}<div class="small">${costHtml(t)}${over ? '<div class="down">Over budget</div>' : ''}${unanswered ? `<div class="muted">${unanswered} unanswered</div>` : ''}</div></div>
     <button class="primary" data-act="endTurn" ${over ? 'disabled' : ''}>End turn →</button></div>`;
 }
 
@@ -198,6 +200,7 @@ export function briefingHtml(s) {
   const d = b.scoreAfter - b.scoreBefore;
   let h = `<div class="sheet brief"><div class="eyebrow">TWO WEEKS LATER · ${fmtDate(dateOf(b.turn + 1))}</div>
     <div class="scoreline"><span class="mono big">${b.scoreBefore.toFixed(0)} → ${b.scoreAfter.toFixed(0)}</span><span class="${d > 0 ? 'up' : d < 0 ? 'down' : 'flat'} mono">${d >= 0 ? '+' : ''}${d.toFixed(1)}</span>${sparkline(s.history.map((x) => x.scores[s.player]))}</div>`;
+  if (s.phase !== 'over') h += `<div id="outlookLine" class="outlook-line small">${outlookLineHtml()}</div>`;
   h += chips(b.worldDelta, 'big');
   if (b.mine.length) h += `<h2>Your decisions</h2>${b.mine.map((r) => resultRow(r, true)).join('')}`;
   const ev = b.events.filter((e) => e.relevant), evOther = b.events.filter((e) => !e.relevant);
@@ -241,6 +244,7 @@ export function intelHtml(s, ui) {
   if (s.player) {
     const decl = Object.values(s.declared).filter((d) => d.actor !== s.player);
     if (decl.length) h += `<h3>Reported intentions</h3><div class="intent">` + decl.map((d) => `<span title="${esc(ACTOR_BY_ID[d.actor].name)}: ${esc(ACTION_BY_ID[d.action].name)}${d.target ? ` · ${esc(targetName(d.target))}` : ''}">${dot(d.actor)}${icon(actionIcon(d.action))}${d.target ? `<span class="muted">${esc(short(d.target))}</span>` : ''}</span>`).join('') + `</div>`;
+    h += intentsHtml(s);
   }
   h += `<h3>Actors</h3><table class="lb"><tr class="muted"><td></td><td class="n">${icon('coin')}</td><td class="n">${icon('shield')}</td><td class="n">${icon('flag')}</td>${s.player ? '<td class="n">Rel</td>' : ''}</tr>`;
   for (const a of ACTORS) {
@@ -284,6 +288,7 @@ export function helpHtml() {
     <div>${icon('crosshair')}<b>Initiative.</b> One move of your own. Advisers rank the best; the full list is a click away. Dots show who will lobby for (▲) or against (▼) it.</div>
     <div>${icon('bolt')}<b>End turn.</b> Everything resolves at once. The briefing shows your results and what touched you; the rest folds away.</div>
     <div>${icon('flag')}<b>Win.</b> Raise your score by 28 (to at least 75) by turn 16. Meet every objective after turn 6 to win outright. Stability 0 is collapse.</div>
+    <div>${icon('eye')}<b>Outlook.</b> Before you commit, the game plays itself out to the end many times from this board, every actor pursuing its own interests. The Futures tab shows how often you win, the likely end states, and how your orders change them.</div>
   </div>
   <div class="btnrow"><button class="primary" data-act="closeModal">Back</button></div></div>`;
 }
@@ -313,6 +318,8 @@ export function statusHtml(s) {
     <span class="n">${sc.toFixed(0)}</span><span class="d ${d > 0.5 ? 'up' : d < -0.5 ? 'down' : 'flat'}">${d > 0.5 ? `▲${d.toFixed(0)}` : d < -0.5 ? `▼${Math.abs(d).toFixed(0)}` : '—'}</span>
     <div class="gauge"><i class="fill ${sc >= th.victory ? 'win' : sc < th.draw ? 'lose' : ''}" style="width:${Math.max(0, Math.min(100, sc))}%"></i><i class="tick start" style="left:${th.start}%" title="Start ${th.start}"></i><i class="tick win" style="left:${th.victory}%" title="Victory ${th.victory}"></i></div></div>`;
   h += `<div class="sb-res"><span title="Treasury">${icon('coin')}${Math.floor(a.money)}</span><span title="Military">${icon('shield')}${Math.floor(a.military)}</span><span title="Political capital">${icon('people')}${Math.floor(a.political)}</span><span title="Stability">${icon('flag')}${Math.floor(a.stability)}</span></div>`;
+  const fc = VIEW.fc, cur = currentForecast(fc);
+  if (s.phase === 'turn') h += `<div class="sb-out ${fc?.running ? 'busy' : ''}" data-act="futures" role="button" title="${cur ? `Outlook ${fc.hasOrders && fc.orders ? 'with your orders' : 'if you hold'}: win ${pct(cur.outcome.victory)} · draw ${pct(cur.outcome.draw)} · defeat ${pct(cur.outcome.defeat)} (${cur.n} simulated games). Click for the futures.` : 'Simulating the futures…'}"><span class="k">Outlook</span>${cur ? `${outlookBar(cur.outcome)}<span class="n">${pct(cur.outcome.victory)}</span>` : '<span class="obar"><i class="busy"></i></span><span class="n muted">…</span>'}</div>`;
   return h;
 }
 
@@ -337,4 +344,100 @@ export function topStripHtml(items, more) {
   return `<div class="topstrip">${items.map((x) => `<button class="topcard ${x.cls}" data-act="top" data-id="${esc(x.theater ?? '')}" data-rank="${x.rank}" title="${esc(x.text)}">
       <span class="rank">${x.rank}</span><span class="oic">${icon(x.icon)}</span>
       <span class="body"><span class="t">${x.actor ? dot(x.actor) : ''}${esc(x.title)}</span>${x.theater ? `<span class="where">${esc(short(x.theater))}</span>` : ''}${chips(x.lines)}</span></button>`).join('')}${more > 0 ? `<button class="topmore" data-act="briefing" title="Everything that happened">+${more}<span>more</span></button>` : ''}</div>`;
+}
+
+// ── futures: many simulated games from this board, summarized ──
+const pct = (x) => `${Math.round((x ?? 0) * 100)}%`;
+const currentForecast = (fc) => (fc?.hasOrders && fc.orders ? fc.orders : fc?.hold ?? null);
+export function outlookBar(oc, cls = '') {
+  if (!oc) return '';
+  const w = Math.round(oc.victory * 100), d = Math.round(oc.draw * 100), l = Math.max(0, 100 - w - d);
+  return `<span class="obar ${cls}" title="Win ${w}% · draw ${d}% · defeat ${l}%"><i class="w" style="width:${w}%"></i><i class="d" style="width:${d}%"></i><i class="l" style="width:${l}%"></i></span>`;
+}
+// One line for the orders bar: the outlook under the current orders, and how it compares with holding.
+function outlookHtml() {
+  const fc = VIEW.fc, cur = currentForecast(fc), hold = fc?.hold;
+  if (!cur) return fc?.running ? `<button class="outlook busy" data-act="futures" title="Open the futures"><span class="obar"><i class="busy"></i></span><span class="muted">simulating the futures…</span></button>` : '';
+  const cmp = fc.hasOrders && fc.orders && hold;
+  const dw = cmp ? Math.round((fc.orders.outcome.victory - hold.outcome.victory) * 100) : null;
+  const dl = cmp ? Math.round((fc.orders.outcome.defeat - hold.outcome.defeat) * 100) : null;
+  let vs = '';
+  if (cmp) vs = `<span class="vs"><span class="${dw > 0 ? 'up' : dw < 0 ? 'down' : 'muted'}">${dw > 0 ? '▲' : dw < 0 ? '▼' : '='}${Math.abs(dw)} win</span> <span class="${dl < 0 ? 'up' : dl > 0 ? 'down' : 'muted'}">${dl < 0 ? '▼' : dl > 0 ? '▲' : '='}${Math.abs(dl)} loss</span> <span class="muted">vs holding</span></span>`;
+  return `<button class="outlook ${fc.running ? 'busy' : ''}" data-act="futures" title="Open the futures">${outlookBar(cur.outcome)}<span>win <b>${pct(cur.outcome.victory)}</b> · draw ${pct(cur.outcome.draw)} · defeat ${pct(cur.outcome.defeat)}</span>${vs}</button>`;
+}
+// Briefing line: this turn's outlook against last turn's.
+export function outlookLineHtml() {
+  const fc = VIEW.fc, prev = fc?.history?.at(-1), cur = fc?.hold;
+  if (!cur) return `<span class="obar"><i class="busy"></i></span><span class="muted">Outlook: simulating the futures…</span>`;
+  const w = Math.round(cur.outcome.victory * 100), pw = prev ? Math.round(prev.win * 100) : null;
+  return `${outlookBar(cur.outcome)}<span>Outlook: win <b>${w}%</b>${pw != null ? ` <span class="${w > pw ? 'up' : w < pw ? 'down' : 'muted'}">(was ${pw}%)</span>` : ''} · final score ${Math.round(cur.final.p10)}–${Math.round(cur.final.p90)}${prev ? ` <span class="muted">(was ${Math.round(prev.p10)}–${Math.round(prev.p90)})</span>` : ''}</span>`;
+}
+// Intel: each actor's assessed mixed strategy (the two likeliest moves).
+const mvLabel = (e) => (e.target ? short(e.target) : ACTION_BY_ID[e.action]?.name ?? e.action);
+function intentsHtml(s) {
+  if (!s.policies) return '';
+  const rows = ACTORS.filter((a) => a.id !== s.player && !s.actors[a.id].collapsed && s.policies[a.id]?.length).map((a) => {
+    const top = [...s.policies[a.id]].sort((x, y) => y.w - x.w).slice(0, 2);
+    return `<div class="irow"><span class="who" title="${esc(a.name)}">${dot(a.id)}${esc(a.short)}</span>${top.map((e) => `<span class="mv" title="${esc(ACTION_BY_ID[e.action]?.name ?? e.action)}${e.target ? ` · ${esc(targetName(e.target))}` : ''}: ${pct(e.w)}"><i style="width:${Math.round(e.w * 100)}%"></i><span class="t">${icon(actionIcon(e.action))}<span class="muted">${esc(mvLabel(e))}</span></span><b>${pct(e.w)}</b></span>`).join('')}</div>`;
+  });
+  return rows.length ? `<h3>Assessed intentions</h3><div class="intents">${rows.join('')}</div>` : '';
+}
+function fanChart(s, cur, hold) {
+  const W = 320, H = 150, L = 6, R = 42, T = 8, B = 16;
+  const x = (t) => L + (t / s.maxTurns) * (W - L - R), y = (v) => T + (1 - Math.max(0, Math.min(100, v)) / 100) * (H - T - B);
+  const th = cur.thresholds;
+  const past = s.history.map((e) => [e.turn, e.scores[s.player]]);
+  let h = `<svg class="fan" viewBox="0 0 ${W} ${H}" role="img" aria-label="Score forecast">`;
+  h += `<line x1="${L}" x2="${W - R}" y1="${y(th.victory)}" y2="${y(th.victory)}" class="thr win"/><text x="${W - R + 3}" y="${y(th.victory) + 3}" class="thl win">win ${th.victory}</text>`;
+  h += `<line x1="${L}" x2="${W - R}" y1="${y(th.draw)}" y2="${y(th.draw)}" class="thr lose"/><text x="${W - R + 3}" y="${y(th.draw) + 3}" class="thl lose">lose ${th.draw}</text>`;
+  const b = cur.bands;
+  const poly = (lo, hi) => b.map((q) => `${x(q.turn).toFixed(1)},${y(q[hi]).toFixed(1)}`).join(' ') + ' ' + [...b].reverse().map((q) => `${x(q.turn).toFixed(1)},${y(q[lo]).toFixed(1)}`).join(' ');
+  h += `<polygon points="${poly('p10', 'p90')}" class="band outer"/><polygon points="${poly('p25', 'p75')}" class="band inner"/>`;
+  if (hold) h += `<polyline points="${hold.bands.map((q) => `${x(q.turn).toFixed(1)},${y(q.p50).toFixed(1)}`).join(' ')}" class="med hold"/>`;
+  h += `<polyline points="${b.map((q) => `${x(q.turn).toFixed(1)},${y(q.p50).toFixed(1)}`).join(' ')}" class="med"/>`;
+  if (past.length >= 2) h += `<polyline points="${past.map(([t, v]) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}" class="past"/>`;
+  if (past.length) h += `<circle cx="${x(past.at(-1)[0]).toFixed(1)}" cy="${y(past.at(-1)[1]).toFixed(1)}" r="2.5" class="nowdot"/>`;
+  for (const t of [1, 4, 8, 12, 16]) if (t <= s.maxTurns) h += `<text x="${x(t).toFixed(1)}" y="${H - 4}" class="xl">T${t}</text>`;
+  h += `</svg>`;
+  return `<div class="fanwrap">${h}<div class="fanlegend small muted"><span class="k past">so far</span><span class="k med">likely path</span>${hold ? '<span class="k hold">if holding</span>' : ''}<span class="k band">8 of 10 games</span></div></div>`;
+}
+function coneChart(hist, cur, s, th) {
+  const pts = [...hist.map((e) => ({ turn: e.turn, p10: e.p10, p50: e.p50, p90: e.p90, win: e.win })), { turn: s.turn, p10: cur.final.p10, p50: cur.final.p50, p90: cur.final.p90, win: cur.outcome.victory }];
+  const W = 320, H = 96, L = 6, R = 42, T = 8, B = 16;
+  const bw = Math.max(5, (W - L - R) / s.maxTurns - 4);
+  const x = (t) => L + ((t - 0.5) / s.maxTurns) * (W - L - R), y = (v) => T + (1 - Math.max(0, Math.min(100, v)) / 100) * (H - T - B);
+  let h = `<svg class="fan cone" viewBox="0 0 ${W} ${H}" role="img" aria-label="How the forecast narrowed">`;
+  h += `<line x1="${L}" x2="${W - R}" y1="${y(th.victory)}" y2="${y(th.victory)}" class="thr win"/><line x1="${L}" x2="${W - R}" y1="${y(th.draw)}" y2="${y(th.draw)}" class="thr lose"/>`;
+  for (const p of pts) h += `<rect x="${(x(p.turn) - bw / 2).toFixed(1)}" y="${y(p.p90).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1.5, y(p.p10) - y(p.p90)).toFixed(1)}" class="cbar"/><line x1="${(x(p.turn) - bw / 2).toFixed(1)}" x2="${(x(p.turn) + bw / 2).toFixed(1)}" y1="${y(p.p50).toFixed(1)}" y2="${y(p.p50).toFixed(1)}" class="cmed"/><text x="${x(p.turn).toFixed(1)}" y="${H - 4}" class="xl">${Math.round(p.win * 100)}</text>`;
+  h += `</svg>`;
+  return `<div class="fanwrap">${h}<div class="small muted">Final-score range forecast at each turn (bar: 8 of 10 games, tick: median) and the win odds, in percent, under the orders you played.</div></div>`;
+}
+export function futuresHtml(s, ui) {
+  if (!s.player) return `<p class="muted small">Futures are computed for a played seat.</p>`;
+  const fc = VIEW.fc, cur = currentForecast(fc), hold = fc?.hold;
+  const withOrders = !!(fc?.hasOrders && fc.orders);
+  let h = `<div class="turnhead"><span class="muted small">${cur ? `${cur.n} games simulated to turn ${s.maxTurns}` : s.phase === 'over' ? 'The game is over' : 'Simulating…'}</span>${fc?.running ? `<span class="muted small mono">${fc.running.done}/${fc.running.n}</span>` : ''}</div>`;
+  if (fc?.running) h += `<div class="prog"><i style="width:${Math.round((100 * fc.running.done) / fc.running.n)}%"></i></div>`;
+  if (!cur) {
+    h += `<p class="muted small">Every actor plays its own interests to the end of the game, many times over. The share of those games you win is your outlook.</p>`;
+    if (fc?.history?.length && s.phase === 'over') h += `<h3>How the picture narrowed</h3>${coneChart(fc.history.slice(0, -1), { final: fc.history.at(-1), outcome: { victory: fc.history.at(-1).win }, thresholds: thresholds(s, s.player) }, { ...s, turn: fc.history.at(-1).turn }, thresholds(s, s.player))}`;
+    return h;
+  }
+  const th = cur.thresholds;
+  h += `<div class="fut-mode small">${withOrders ? '<b>With your current orders</b>' : s.phase === 'turn' ? '<b>If you hold this turn</b>' : '<b>From here</b>'}${withOrders && hold ? ` <span class="muted">· holding: win ${pct(hold.outcome.victory)}, defeat ${pct(hold.outcome.defeat)}</span>` : ''}</div>`;
+  h += `<div class="fut-oc">${outlookBar(cur.outcome, 'big')}<div class="legend"><span class="w">Win ${pct(cur.outcome.victory)}</span><span class="d">Draw ${pct(cur.outcome.draw)}</span><span class="l">Defeat ${pct(cur.outcome.defeat)}</span></div></div>`;
+  h += fanChart(s, cur, withOrders ? hold : null);
+  h += `<div class="small muted fut-fin">Final score likely <b class="mono">${Math.round(cur.final.p25)}–${Math.round(cur.final.p75)}</b>, ${Math.round(cur.final.p10)}–${Math.round(cur.final.p90)} in 8 of 10 games · victory ≥ ${th.victory} · defeat below ${th.draw}</div>`;
+  const ends = cur.ends.filter((e) => e.p >= 0.08).slice(0, 9);
+  if (ends.length) h += `<h3>Likely end states</h3><div class="fut-ends">${ends.map((e) => `<div class="fend ${e.good > 0 ? 'good' : e.good < 0 ? 'bad' : ''}"><span class="lbl">${esc(e.label)}</span><span class="bar"><i style="width:${Math.round(e.p * 100)}%"></i></span><span class="pct mono">${pct(e.p)}</span></div>`).join('')}</div>`;
+  h += `<h3>Your objectives at the end</h3>` + cur.goals.map((g) => {
+    const f = (v) => `${g.unit === '$' ? '$' : ''}${Math.round(v)}${g.unit === '%' ? '%' : ''}`;
+    const lo = Math.round(g.progress.p10 * 100), hi = Math.round(g.progress.p90 * 100), med = Math.round(g.progress.p50 * 100), now = Math.round(g.progressNow * 100);
+    return `<div class="fgoal ${g.met >= 0.5 ? 'met' : ''}"><div class="top"><span>${esc(g.name)}</span><span class="val"><span class="muted">${f(g.now)} →</span> <b>${f(g.value.p50)}</b> <span class="muted">· met in ${pct(g.met)}</span></span></div><div class="fbar" title="Now ${f(g.now)}; likely ${f(g.value.p10)}–${f(g.value.p90)}"><i class="range" style="left:${lo}%;width:${Math.max(1, hi - lo)}%"></i><i class="med" style="left:${med}%"></i><i class="now" style="left:${now}%"></i></div></div>`;
+  }).join('');
+  const win = cur.winners.filter((w) => w.p >= 0.1).slice(0, 8);
+  if (win.length) h += `<h3>Who gets what they want</h3><div class="fut-win">${win.map((w) => `<span class="wchip ${w.id === s.player ? 'me' : ''}" title="${esc(name(w.id))} reaches its victory bar in ${pct(w.p)} of games">${dot(w.id)}${esc(short(w.id))} <b>${pct(w.p)}</b></span>`).join('')}</div>`;
+  if (fc?.history?.length) h += `<h3>How the picture has narrowed</h3>${coneChart(fc.history, cur, s, th)}`;
+  h += `<details class="elsewhere"><summary>How this is computed</summary><div class="small muted">Every actor, you included, plays its own interests: each turn it weighs its best moves against the board, with some randomness, and the game master rolls hidden dice. ${cur.n} such games are played to turn ${s.maxTurns} from this board${withOrders ? ', starting with your orders' : ''}. Each move you make narrows the range.</div></details>`;
+  return h;
 }

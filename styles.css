@@ -398,3 +398,59 @@ button.more { border: 0; background: transparent; color: var(--amber); padding: 
   .topcard .fx { display: none; }
   .topmore { padding: 6px 8px; }
 }
+
+/* ── outlook and futures ── */
+.obar { display: inline-flex; width: 72px; height: 8px; border-radius: 4px; overflow: hidden; background: #0b1118; border: 1px solid var(--line); vertical-align: middle; flex: none; position: relative; }
+.obar i { display: block; height: 100%; }
+.obar .w { background: var(--green); } .obar .d { background: #4a5a6e; } .obar .l { background: var(--red); }
+.obar i.busy { position: absolute; left: 0; top: 0; width: 40%; background: linear-gradient(90deg, transparent, var(--amber), transparent); animation: obusy 1.2s linear infinite; }
+@keyframes obusy { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+.obar.big { width: 100%; height: 14px; border-radius: 7px; }
+.sb-out { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; }
+.sb-out .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.sb-out .n { font-family: var(--mono); font-weight: 700; min-width: 32px; }
+.sb-out.busy .obar { opacity: .75; }
+.orders .ocol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.outlook { display: flex; align-items: center; gap: 8px; background: transparent; border: 0; padding: 0; color: var(--text); font-size: 12px; text-align: left; cursor: pointer; flex-wrap: wrap; }
+.outlook:hover { color: var(--amber); }
+.outlook .vs { font-family: var(--mono); font-size: 11px; }
+.outlook-line { display: flex; align-items: center; gap: 6px; margin: -4px 0 10px; flex-wrap: wrap; }
+.fut-mode { margin: 4px 0 6px; }
+.fut-oc .legend { display: flex; justify-content: space-between; font-size: 12px; margin: 4px 0 8px; }
+.fut-oc .legend .w { color: var(--green); } .fut-oc .legend .l { color: var(--red); } .fut-oc .legend .d { color: var(--muted); }
+.fut-fin { margin: 2px 0 6px; }
+.fanwrap { margin: 6px 0 4px; }
+.fan { width: 100%; height: auto; display: block; }
+.fan .band.outer { fill: rgba(240,180,41,.14); } .fan .band.inner { fill: rgba(240,180,41,.26); }
+.fan .med { fill: none; stroke: var(--amber); stroke-width: 2; }
+.fan .med.hold { stroke: #8a97a8; stroke-dasharray: 3 3; stroke-width: 1.5; }
+.fan .past { fill: none; stroke: #e8eef5; stroke-width: 2; } .fan .nowdot { fill: #e8eef5; }
+.fan .thr { stroke-dasharray: 2 3; stroke-width: 1; } .fan .thr.win { stroke: var(--green); } .fan .thr.lose { stroke: var(--red); }
+.fan text { font-size: 8px; fill: var(--muted); font-family: var(--mono); } .fan .thl.win { fill: var(--green); } .fan .thl.lose { fill: var(--red); } .fan .xl { text-anchor: middle; }
+.fan .cbar { fill: rgba(240,180,41,.3); } .fan .cmed { stroke: var(--amber); stroke-width: 2; }
+.fanlegend { display: flex; gap: 10px; flex-wrap: wrap; }
+.fanlegend .k::before { content: ''; display: inline-block; width: 14px; height: 3px; margin-right: 4px; vertical-align: middle; background: #e8eef5; }
+.fanlegend .k.med::before { background: var(--amber); } .fanlegend .k.hold::before { background: #8a97a8; } .fanlegend .k.band::before { height: 8px; background: rgba(240,180,41,.26); }
+.fut-ends { display: flex; flex-direction: column; gap: 4px; }
+.fend { display: grid; grid-template-columns: 1fr 90px 40px; align-items: center; gap: 8px; font-size: 12px; }
+.fend .bar { height: 7px; background: #0b1118; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.fend .bar i { display: block; height: 100%; background: #4a5a6e; }
+.fend.good .bar i { background: var(--green); } .fend.bad .bar i { background: var(--red); }
+.fend .pct { text-align: right; } .fend.good .lbl { color: var(--green); } .fend.bad .lbl { color: var(--red); }
+.fgoal { margin: 6px 0; font-size: 12px; } .fgoal .top { display: flex; justify-content: space-between; gap: 8px; }
+.fbar { position: relative; height: 8px; background: #0b1118; border: 1px solid var(--line); border-radius: 4px; margin-top: 5px; }
+.fbar .range { position: absolute; top: 0; bottom: 0; background: rgba(240,180,41,.3); }
+.fbar .med { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--amber); transform: translateX(-1px); }
+.fbar .now { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #e8eef5; transform: translateX(-1px); }
+.fgoal.met .fbar .range { background: rgba(70,167,88,.35); } .fgoal.met .fbar .med { background: var(--green); }
+.fut-win { display: flex; flex-wrap: wrap; gap: 4px; }
+.wchip { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: #0b1118; }
+.wchip.me { border-color: var(--amber); }
+.prog { height: 4px; background: #0b1118; border-radius: 2px; overflow: hidden; margin: 4px 0 8px; } .prog i { display: block; height: 100%; background: var(--amber); transition: width .2s; }
+.intents { display: flex; flex-direction: column; gap: 3px; }
+.irow { display: grid; grid-template-columns: 58px 1fr 1fr; gap: 6px; align-items: center; font-size: 11px; }
+.irow .who { display: flex; align-items: center; gap: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.irow .mv { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #0b1118; min-width: 0; }
+.irow .mv i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(74,90,110,.45); }
+.irow .mv .t, .irow .mv b { position: relative; } .irow .mv .t { display: inline-flex; align-items: center; gap: 3px; min-width: 0; white-space: nowrap; overflow: hidden; }
+@media (max-width: 900px) { .irow { grid-template-columns: 64px 1fr 1fr; } }
