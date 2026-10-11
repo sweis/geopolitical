@@ -1,0 +1,18 @@
+{
+  "name": "geopolitical",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser matrix game set in the 2026 Middle East",
+  "type": "module",
+  "scripts": {
+    "serve": "http-server -p 8080 -c-1 .",
+    "build:map": "node tools/build-map.mjs",
+    "test": "node tests/run.mjs"
+  },
+  "devDependencies": {
+    "d3-geo": "^3.1.1",
+    "playwright": "1.56.1",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
+  }
+}
