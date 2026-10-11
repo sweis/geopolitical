@@ -9,16 +9,18 @@
 //   win()/lose()         → force the outcome
 //   cam(name)            → named cameras: overview, levant, gulf, hero-close, hud-check
 //   getState()           → JSON snapshot for assertions
+// Scripted play through the same engine calls the UI uses: choose(situationId, optionId),
+// order(action, target, commit), clearOrder(), endTurn(), preview(action, target, commit), proposals().
 import { ACTORS } from '../data/actors.js';
 import { EVENTS } from '../data/events.js';
 import { THEATERS } from '../data/theaters.js';
-import { spawnEvent, forceOutcome, scores, declare, openDebate, argue, resolveTurn, nextTurn, preview, thresholds } from '../engine/game.js';
+import { spawnEvent, forceOutcome, scores, choose, setInitiative, clearInitiative, endTurn, previewInitiative, proposals, ordersTotal, thresholds } from '../engine/game.js';
 import { goalReport } from '../engine/goals.js';
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { tension } from '../engine/state.js';
 import { drawArcs, flash } from '../ui/mapView.js';
 
-export function installDev(app, { startGame, render, autoStep, showStart }) {
+export function installDev(app, { startGame, render, autoStep, showStart, afterTurn }) {
   const params = new URLSearchParams(location.search);
   const autodt = +(params.get('autodt') ?? 1200);
   let timer = null;
@@ -35,6 +37,7 @@ export function installDev(app, { startGame, render, autoStep, showStart }) {
   const game = {
     getState() {
       const s = app.s;
+      const b = s.briefing;
       return {
         seed: s.seed, turn: s.turn, maxTurns: s.maxTurns, phase: s.phase, player: s.player, outcome: s.outcome,
         world: { ...s.world }, flags: { ...s.flags },
@@ -44,12 +47,14 @@ export function installDev(app, { startGame, render, autoStep, showStart }) {
         thresholds: s.player ? thresholds(s, s.player) : null,
         theaters: Object.fromEntries(Object.values(s.theaters).map((t) => [t.id, { tension: t.tension, infl: { ...t.infl } }])),
         declared: Object.values(s.declared).map((d) => ({ actor: d.actor, action: d.action, target: d.target, commit: d.commit, args: d.args.length })),
-        debate: s.debate.map((d) => ({ ...d })),
+        situations: s.situations.map((x) => ({ id: x.id, kind: x.kind, title: x.title, at: x.at, choice: x.choice, options: x.options.map((o) => ({ id: o.id, label: o.label, p: o.p, band: o.band, cost: o.cost, affordable: o.affordable, default: o.default })) })),
+        orders: { ...s.orders, total: s.player ? ordersTotal(s) : null },
+        briefing: b ? { turn: b.turn, mine: b.mine.length, affecting: b.affecting.length, elsewhere: b.elsewhere.length, events: b.events.length, scoreBefore: b.scoreBefore, scoreAfter: b.scoreAfter, mineOutcomes: b.mine.map((r) => ({ kind: r.kind, id: r.id ?? r.action, option: r.option ?? r.target, outcome: r.outcome, roll: r.roll })) } : null,
         results: s.results.map((r) => ({ actor: r.actor, action: r.action, target: r.target, p: r.p, roll: r.roll, outcome: r.outcome })),
-        news: s.news.map((n) => n.id), logLength: s.log.length, historyLength: s.history.length,
-        ui: { tab: app.ui.tab, action: app.ui.action, target: app.ui.target, commit: app.ui.commit, cam: app.map.cam, modalOpen: !document.getElementById('modal').hidden },
+        news: s.news.map((n) => n.id), logLength: s.log.length, historyLength: s.history.length, recentLength: s.recent.length,
+        ui: { tab: app.ui.tab, action: app.ui.action, target: app.ui.target, commit: app.ui.commit, cam: app.map.cam, modalOpen: !document.getElementById('modal').hidden, overlay: app.ui.overlay },
         perf: { frameMs: +frame.ms.toFixed(2), lastTurnMs: app.metrics.lastTurnMs, renders: app.metrics.renders, domNodes: document.getElementsByTagName('*').length, svgNodes: document.querySelectorAll('#map *').length, drawCalls: null, shaderPrograms: null, renderer: rendererString, contextLost: false },
-        errors: [...app.errors], autoplay: !!timer, simTime: s.turn - 1 + (s.phase === 'results' || s.phase === 'over' ? 1 : 0),
+        errors: [...app.errors], autoplay: !!timer, simTime: s.history.length - 1,
       };
     },
     start(actor = 'us', seed = app.s.seed) { startGame(actor === 'observer' ? null : actor, seed); return game.getState().player; },
@@ -71,12 +76,12 @@ export function installDev(app, { startGame, render, autoStep, showStart }) {
     clearAll() { for (const t of Object.values(app.s.theaters)) t.tension = 0; app.s.news = []; drawArcs(app.map, [], app.s.player); render(); return true; },
     win() { forceOutcome(app.s, 'victory'); render(); return app.s.outcome; },
     lose() { forceOutcome(app.s, 'defeat'); render(); return app.s.outcome; },
-    // Scripted play through the same engine calls the UI uses.
-    declare(action, target = null, commit = 0) { declare(app.s, app.s.player, action, target, commit); openDebate(app.s); render(); return game.getState().declared.length; },
-    argue(actor, stance) { argue(app.s, actor, stance); render(); return true; },
-    resolve() { resolveTurn(app.s); drawArcs(app.map, app.s.results, app.s.player); render(); return app.s.results.length; },
-    next() { nextTurn(app.s); render(); return app.s.turn; },
-    preview(action, target = null, commit = 0) { return preview(app.s, app.s.player, action, target, commit); },
+    choose(sit, opt) { choose(app.s, sit, opt); render(); return true; },
+    order(action, target = null, commit = 0) { setInitiative(app.s, action, target, commit); render(); return app.s.orders.initiative; },
+    clearOrder() { clearInitiative(app.s); render(); return true; },
+    endTurn() { endTurn(app.s); afterTurn?.(); render(); return app.s.turn; },
+    preview(action, target = null, commit = 0) { return previewInitiative(app.s, action, target, commit); },
+    proposals() { return proposals(app.s); },
     showStart,
     registry: { actors: ACTORS.map((a) => a.id), theaters: THEATERS.map((t) => t.id), events: EVENTS.map((e) => e.id), cams: ['overview', 'levant', 'gulf', 'hero-close', 'hud-check'] },
   };

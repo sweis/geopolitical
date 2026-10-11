@@ -2,7 +2,8 @@
 import { C, FREE, fromAction, opt } from './dsl.js';
 import { ACTOR_BY_ID } from '../actors.js';
 import { homeOf } from '../../engine/state.js';
-import { canUse, ACTION_BY_ID } from '../../engine/actions.js';
+import { canUse, ACTION_BY_ID, ACTIONS, affordable } from '../../engine/actions.js';
+import { simClone } from '../../engine/state.js';
 
 const can = (h, id) => canUse(ACTION_BY_ID[id], h.p);
 const hasTarget = (h, id, t) => { try { return ACTION_BY_ID[id].targets(h.s, h.p).includes(t); } catch { return false; } };
@@ -33,6 +34,11 @@ export const GENERIC = [
         out.push(fromAction(h, 'offensive', foeHome, { id: 'retaliate', label: `Counter-attack in ${h.short(foeHome)}`, bonus: 0.05, why: 'Enemy forces are exposed after their attack' }));
       else if (foe && can(h, 'infoOps') && hasTarget(h, 'infoOps', foe))
         out.push(fromAction(h, 'infoOps', foe, { id: 'retaliate', label: `Expose and shame ${h.short(foe)}`, text: 'Flood the information space with the attack\'s civilian cost.', bonus: 0.1, why: 'Fresh footage, global attention' }));
+      out.push(opt({
+        id: 'harden', label: 'Harden defenses', text: 'Disperse assets, dig in, buy interceptors.', cost: C(4, 0, 0),
+        success: (h2) => { h2.res(h2.p, { military: 6, stability: 1 }); if (h2.home) h2.tension(h2.home, -4); },
+        say: { success: 'Defenses were hardened; the next strike will find less to hit.' },
+      }));
       out.push(opt({
         id: 'absorb', label: 'Absorb the blow and rally', text: 'Bury the dead, show resolve, hold the line for now.', cost: C(0, 0, 1),
         success: (h2) => { h2.res(h2.p, { stability: 3 }); if (h2.p === 'us') h2.W('usWarSupport', 2); },
@@ -85,6 +91,7 @@ export const GENERIC = [
       const patron = h.patron();
       const out = [
         opt({ id: 'austerity', label: 'Austerity', text: 'Cut everything that is not a gun or a salary.', cost: FREE, success: (h2) => { h2.res(h2.p, { money: 8, stability: -4 }); }, say: { success: 'Austerity bought breathing room and cost goodwill.' }, default: true }),
+        opt({ id: 'print', label: isState(h) ? 'Print money' : 'Borrow from the networks', text: isState(h) ? 'Inflation later for cash now.' : 'Loans from the diaspora and the smugglers.', cost: C(0, 0, 1), success: (h2) => { h2.res(h2.p, { money: 6, stability: -2 }); }, say: { success: 'Cash now; the bill comes later.' } }),
       ];
       if (patron) out.push(opt({ id: 'patron', label: `Ask ${h.short(patron)} for a bailout`, text: 'Emergency deposits in exchange for loyalty.', cost: C(0, 0, 1), odds: 0.5,
         reasons: (h2) => [{ text: `${h2.short(patron)} relationship ${h2.relOf(patron)}`, d: h2.relOf(patron) / 300 }],
@@ -210,7 +217,167 @@ export const GENERIC = [
       ];
     },
   },
+
+  // ── The front heats up ──
+  {
+    id: 'g_front', who: 'ALL', kind: 'crisis', priority: 55, cooldown: 3,
+    when: (h) => !!h.home && h.T(h.home).tension >= 60 && h.hit(1).length === 0,
+    at: (h) => h.home,
+    title: (h) => `Tension rising in ${h.short(h.home)}`,
+    text: (h) => `Skirmishes, drone sightings and mobilization rumours around ${h.short(h.home)}. Your commanders want reinforcements; your diplomats want a channel opened before someone miscalculates.`,
+    options: (h) => {
+      const foe = hostileAt(h, h.home);
+      return [
+        opt({ id: 'reinforce', label: 'Reinforce the front', text: 'Move units forward and harden positions.', cost: C(4, 0, 0), success: (h2) => { h2.res(h2.p, { military: 5 }); h2.inf(h2.home, h2.p, 5); h2.tension(h2.home, -6); }, say: { success: 'Reinforcements arrived; the probing stopped.' } }),
+        opt({ id: 'deescalate', label: 'Open a deconfliction channel', text: 'Hotlines and a quiet message.', cost: C(0, 0, 1), odds: 0.6,
+          reasons: (h2) => [...(foe && h2.relOf(foe) <= -80 ? [{ text: 'No trust on either side', d: -0.15 }] : [])],
+          success: (h2) => { h2.tension(h2.home, -15); if (foe) h2.rel(h2.p, foe, 5); }, fail: (h2) => { h2.tension(h2.home, 5); },
+          say: { success: 'A hotline and a pause. The front cooled.', fail: 'The message went unanswered and the probing continued.' }, default: true }),
+        ...(foe && homeOf(foe) && can(h, 'strike') && hasTarget(h, 'strike', homeOf(foe)) ? [fromAction(h, 'strike', homeOf(foe), { id: 'preempt', label: `Pre-empt ${h.short(foe)}`, text: 'Strike first while they are still massing.', bonus: 0.05, why: 'Forces caught in the open' })] : []),
+      ];
+    },
+  },
+
+  // ── Contested ground ──
+  {
+    id: 'g_contested', who: 'ALL', kind: 'opportunity', priority: 45, cooldown: 3,
+    when: (h) => contested(h) != null,
+    at: (h) => contested(h).t,
+    title: (h) => `Contested ground in ${h.short(contested(h).t)}`,
+    text: (h) => { const { t, foe } = contested(h); return `${h.name(foe)} is building up in ${h.short(t)}, where your own position matters. Surge now, bargain for a share, or cede quietly.`; },
+    options: (h) => {
+      const { t, foe } = contested(h);
+      return [
+        opt({ id: 'surge', label: 'Surge', text: 'Money, men and advisers into the theater.', cost: C(5, 4, 0), success: (h2) => { h2.inf(t, h2.p, 10); h2.inf(t, foe, -4); h2.tension(t, 6); }, say: { success: `Your position in ${h.short(t)} grew at ${h.short(foe)}'s expense.` } }),
+        opt({ id: 'bargain', label: 'Bargain for a share', text: 'A quiet spheres-of-influence understanding.', cost: C(0, 0, 2), odds: 0.5,
+          reasons: (h2) => [{ text: `Relationship with ${h2.short(foe)}: ${h2.relOf(foe)}`, d: h2.relOf(foe) / 400 }],
+          success: (h2) => { h2.inf(t, h2.p, 5); h2.rel(h2.p, foe, 8); h2.tension(t, -8); }, fail: (h2) => { h2.inf(t, h2.p, -3); },
+          say: { success: `An understanding with ${h.short(foe)} over ${h.short(t)}.`, fail: `${h.name(foe)} took the meeting and kept building.` } }),
+        opt({ id: 'cede', label: 'Cede quietly', text: 'Pull back and save the resources.', cost: FREE, success: (h2) => { h2.inf(t, h2.p, -8); h2.res(h2.p, { money: 3 }); }, say: { success: `You pulled back from ${h.short(t)}.` }, default: true }),
+      ];
+    },
+  },
+
+  // ── The patron asks for something ──
+  {
+    id: 'g_patron_asks', who: 'ALL', kind: 'crisis', priority: 48, cooldown: 4,
+    when: (h) => h.kind !== 'superpower' && h.patron() != null,
+    at: (h) => homeOf(h.patron()) ?? h.home,
+    title: (h) => `${h.name(h.patron())} calls in a favour`,
+    text: (h) => { const pt = h.patron(); return `${h.name(pt)} wants ${ASK[pt] ?? 'public support for its position'}. Patrons remember who answered.`; },
+    options: (h) => {
+      const pt = h.patron();
+      return [
+        opt({ id: 'deliver', label: 'Deliver', text: 'Give the patron what it asked for.', cost: C(4, 2, 1), success: (h2) => { h2.rel(h2.p, pt, 12); h2.res(h2.p, { political: 1 }); const ph = homeOf(pt); if (ph) h2.inf(ph, h2.p, 3); if (h2.home) h2.inf(h2.home, pt, 4); }, say: { success: `${h.name(pt)} got what it asked for and said so publicly.` } }),
+        opt({ id: 'token', label: 'A token gesture', text: 'Enough to be seen, not enough to cost.', cost: C(0, 0, 1), success: (h2) => { h2.rel(h2.p, pt, 3); }, say: { success: 'A statement and a small contribution.' }, default: true }),
+        opt({ id: 'refuse', label: 'Refuse', text: 'Your resources are your own.', cost: FREE, success: (h2) => { h2.rel(h2.p, pt, -10); h2.res(h2.p, { stability: 1 }); }, say: { success: `${h.name(pt)} was told no.` } }),
+      ];
+    },
+  },
+
+  // ── A defector ──
+  {
+    id: 'g_defector', who: 'ALL', kind: 'opportunity', priority: 40, cooldown: 5,
+    when: (h) => h.enemies(-60).length > 0 && h.turn >= 2,
+    at: (h) => homeOf(h.enemies(-60)[0]) ?? h.home,
+    title: (h) => `A defector from ${h.short(h.enemies(-60)[0])}`,
+    text: (h) => `A mid-level official from ${h.name(h.enemies(-60)[0])} is offering documents and names in exchange for protection. The intelligence could be gold; it could also be a plant.`,
+    options: (h) => {
+      const e = h.enemies(-60)[0];
+      return [
+        opt({ id: 'accept', label: 'Take the defector', text: 'Protection for the files.', cost: C(2, 0, 1), odds: 0.6,
+          success: (h2) => { h2.res(e, { stability: -4, political: -1 }); h2.res(h2.p, { political: 2 }); }, fail: (h2) => { h2.res(h2.p, { political: -1, stability: -1 }); },
+          say: { success: `The files were genuine. ${h.name(e)} is purging its ministries.`, fail: 'A plant. Two of your own networks were exposed.' } }),
+        opt({ id: 'ignore', label: 'Pass', text: 'Too risky.', cost: FREE, default: true, say: { success: 'The offer went unanswered.' } }),
+      ];
+    },
+  },
+
+  // ── A scandal ──
+  {
+    id: 'g_scandal', who: 'STATE', kind: 'crisis', priority: 42, cooldown: 5,
+    when: (h) => h.turn >= 2 && h.me.stability < 65,
+    at: (h) => h.home,
+    title: 'A scandal breaks',
+    text: () => 'Leaked recordings show senior officials diverting war funds and lying about casualties. The opposition smells blood; your allies abroad are asking questions.',
+    options: (h) => [
+      opt({ id: 'investigate', label: 'Investigate and sack', text: 'Heads roll, credibility survives.', cost: C(0, 0, 1), success: (h2) => { h2.res(h2.p, { stability: 3 }); for (const a of h2.allies(40).slice(0, 2)) h2.rel(h2.p, a, 2); }, say: { success: 'Three officials resigned; the story moved on.' }, default: true }),
+      opt({ id: 'deny', label: 'Deny everything', text: 'Call it a forgery.', cost: FREE, odds: 0.5, success: (h2) => { h2.res(h2.p, { stability: 2 }); }, fail: (h2) => { h2.res(h2.p, { stability: -6 }); }, say: { success: 'The denial held.', fail: 'A second leak proved the first.' } }),
+      opt({ id: 'foreign', label: 'Blame foreign intelligence', text: 'A hostile operation, obviously.', cost: C(0, 0, 1), success: (h2) => { h2.res(h2.p, { stability: 1 }); const e = h2.enemies(-50)[0]; if (e) h2.rel(h2.p, e, -5); }, say: { success: 'The foreign-plot story bought a week.' } }),
+    ],
+  },
+
+  // ── An objective is slipping ──
+  {
+    id: 'g_slipping', who: 'ALL', kind: 'opportunity', priority: 48, cooldown: 2,
+    when: (h) => { const sl = slipping(h); return sl != null && servingGoal(h, sl.goal).length >= 1; },
+    at: (h) => h.home,
+    title: (h) => `Advisers alarmed: ${slipping(h).goal.name}`,
+    text: (h) => { const { goal, drop } = slipping(h); return `Progress on "${goal.name}" fell ${Math.round(drop * 100)} points over the last fortnight. Your staff has pulled together the options that would move it, and wants a decision.`; },
+    options: (h) => {
+      const { goal } = slipping(h);
+      const picks = servingGoal(h, goal).slice(0, 2);
+      const out = picks.map((c, i) => fromAction(h, c.action, c.target, { id: `fix${i}`, bonus: 0.05, why: 'Staff attention and priority' }));
+      out.push(opt({ id: 'accept', label: 'Accept the setback for now', text: 'Other fires are hotter.', cost: FREE, default: true, say: { success: 'The setback was noted and set aside.' } }));
+      return out;
+    },
+  },
+
+  // ── A quiet fortnight (floor card: only dealt when nothing else is pressing) ──
+  {
+    id: 'g_allocate', who: 'ALL', kind: 'opportunity', priority: 5, cooldown: 2,
+    when: () => true,
+    at: (h) => h.home,
+    title: 'A quiet fortnight',
+    text: (h) => (isState(h) ? 'No crisis demands the cabinet\'s attention this fortnight. Use the time: train the forces, shore up the home front, raise money, or work the phones.' : 'A rare quiet fortnight. Train, consolidate the base, raise money, or build political ties.'),
+    options: (h) => [
+      opt({ id: 'train', label: 'Train and equip', text: 'Exercises, maintenance, new units.', cost: C(4, 0, 0), success: (h2) => { h2.res(h2.p, { military: 6 }); }, say: { success: 'Two weeks of exercises and maintenance.' } }),
+      opt({ id: 'consolidate', label: 'Shore up the home front', text: 'Patronage, services, a little theatre.', cost: C(3, 0, 0), success: (h2) => { h2.res(h2.p, { stability: 5 }); }, say: { success: 'Services and patronage bought goodwill at home.' }, default: true }),
+      opt({ id: 'raise', label: 'Raise money', text: 'Taxes, sales, donors.', cost: C(0, 0, 1), success: (h2) => { h2.res(h2.p, { money: 8 }); }, say: { success: 'The treasury grew.' } }),
+      opt({ id: 'phones', label: 'Work the phones', text: 'Visits, favours and photo opportunities.', cost: C(2, 0, 0), success: (h2) => { h2.res(h2.p, { political: 2 }); for (const a of h2.allies(30).slice(0, 2)) h2.rel(h2.p, a, 3); }, say: { success: 'A fortnight of visits and favours.' } }),
+    ],
+  },
 ];
+
+const ASK = { us: 'troops for the Hormuz coalition and a vote with Washington at the UN', iran: 'a public pledge of loyalty to the Axis and a contribution to the Resistance front', saudi: 'public backing for its Yemen policy and a seat for Saudi investors', turkey: 'support for its position on the Syrian Kurds', china: 'a port concession and silence on Xinjiang', russia: 'a vote against Western resolutions and a grain contract', eu: 'reforms on human rights and migration cooperation' };
+
+function hostileAt(h, t) {
+  const infl = h.T(t).infl;
+  return Object.keys(infl).filter((id) => id !== h.p && h.alive(id) && h.relOf(id) <= -40 && infl[id] >= 10).sort((a, b) => infl[b] - infl[a])[0] ?? null;
+}
+function contested(h) {
+  for (const t of Object.keys(h.s.theaters)) {
+    if (t === h.home || h.infOf(t) < 20) continue;
+    const foe = Object.keys(h.T(t).infl).find((id) => id !== h.p && h.alive(id) && h.relOf(id) <= -40 && h.infOf(t, id) >= 25);
+    if (foe) return { t, foe };
+  }
+  return null;
+}
+function slipping(h) {
+  const hist = h.s.history;
+  if (hist.length < 2 || !hist.at(-1).progress || !hist.at(-2).progress) return null;
+  const goals = ACTOR_BY_ID[h.p].goals;
+  let best = null;
+  goals.forEach((goal, i) => {
+    const drop = hist.at(-2).progress[i] - hist.at(-1).progress[i];
+    if (drop >= 0.1 && (!best || drop > best.drop)) best = { goal, drop, i };
+  });
+  return best;
+}
+// Catalogue moves that would advance a goal on success, best first.
+function servingGoal(h, goal) {
+  const out = [];
+  for (const act of ACTIONS) {
+    if (!canUse(act, h.p) || act.id === 'hold' || !affordable(h.s, h.p, act, 0)) continue;
+    for (const target of act.targets(h.s, h.p)) {
+      const c = simClone(h.s);
+      try { act.success(c, h.p, target, 1); } catch { continue; }
+      const gain = goal.progress(c) - goal.progress(h.s);
+      if (gain > 0.03) out.push({ action: act.id, target, gain });
+    }
+  }
+  return out.sort((a, b) => b.gain - a.gain);
+}
 
 // ── selectors ──
 function partnerInNeed(h) {

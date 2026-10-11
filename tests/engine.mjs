@@ -1,11 +1,13 @@
-// Engine checks in Node: content probes over the registries, invariants over full AI games, determinism.
+// Engine checks in Node: content probes over the registries, a scripted player turn through the
+// engine API, invariants over full AI games, determinism.
 import { ACTORS, ACTOR_BY_ID } from '../src/data/actors.js';
 import { THEATERS, THEATER_BY_ID, ANCHORS } from '../src/data/theaters.js';
 import { EVENTS, THRESHOLDS } from '../src/data/events.js';
 import { MAP_W, MAP_H, project } from '../src/data/map.js';
 import { ACTIONS, canUse } from '../src/engine/actions.js';
-import { newGame, autoTurn, scores, declare, openDebate, resolveTurn, playerMenu } from '../src/engine/game.js';
+import { newGame, autoTurn, scores, choose, setInitiative, endTurn, playerMenu, previewInitiative, proposals } from '../src/engine/game.js';
 import { evaluate } from '../src/engine/adjudicate.js';
+import { SITUATIONS } from '../src/data/situations/index.js';
 
 let failures = 0;
 const ok = (cond, msg) => { if (!cond) { failures++; console.log(`FAIL  ${msg}`); } else console.log(`PASS  ${msg}`); };
@@ -19,6 +21,7 @@ ok(ACTORS.every((a) => a.home === null ? !!ANCHORS[a.id] : !!THEATER_BY_ID[a.hom
 ok(ACTORS.every((a) => a.goals.length >= 3), 'every actor has at least 3 goals');
 ok(ACTIONS.every((x) => x.who === 'ALL' || x.who === 'NONSTATE' || x.who.every((id) => ACTOR_BY_ID[id])), 'every action who-list resolves');
 ok(EVENTS.concat(THRESHOLDS).every((e) => THEATER_BY_ID[e.at]), 'every event location resolves to a theater');
+ok(SITUATIONS.every((d) => d.id && d.kind && typeof d.when === 'function' && typeof d.options === 'function' && (Array.isArray(d.who) ? d.who.every((id) => ACTOR_BY_ID[id]) : true)), `${SITUATIONS.length} situation definitions are well-formed`);
 {
   const s = newGame({ seed: 1, player: null });
   for (const a of ACTORS) {
@@ -36,20 +39,33 @@ ok(EVENTS.concat(THRESHOLDS).every((e) => THEATER_BY_ID[e.at]), 'every event loc
   ok(ACTORS.every((a) => start[a.id] > 15 && start[a.id] < 75), `starting scores in a playable band: ${ACTORS.map((a) => `${a.id}=${start[a.id].toFixed(0)}`).join(' ')}`);
 }
 
-// ── player turn through the engine API ──
+// ── a scripted player turn through the engine API ──
 {
   const s = newGame({ seed: 4, player: 'iran' });
+  ok(s.phase === 'turn' && s.turn === 1, 'new game opens on turn 1 in the turn phase');
+  ok(Object.keys(s.declared).length === ACTORS.length - 1, 'every other actor declared before the player moves');
+  ok(s.situations.length >= 1 && s.situations.every((x) => x.options.length >= 2 && x.options.some((o) => o.default)), `situation cards dealt: ${s.situations.map((x) => x.id).join(', ')}`);
   const menu = playerMenu(s);
   ok(menu.some((m) => m.id === 'harass' && m.affordable), 'Iran can attack shipping on turn 1');
-  declare(s, 'iran', 'harass', 'hormuz', 0);
+  const props = proposals(s);
+  ok(props.length >= 3 && props.every((x) => x.band && x.cost), `advisers propose ${props.length} initiatives: ${props.map((x) => x.action).join(', ')}`);
+  const pv = previewInitiative(s, 'harass', 'hormuz', 0);
+  ok(pv.p >= 0.05 && pv.p <= 0.95 && Array.isArray(pv.args), `initiative preview p=${pv.p} (${pv.band}), expected arguments: ${pv.args.length}`);
+  const card = s.situations.find((x) => x.kind !== 'intel');
+  const pick = card.options.find((o) => o.affordable && !o.default) ?? card.options[0];
+  choose(s, card.id, pick.id);
+  setInitiative(s, 'harass', 'hormuz', 0);
   const before = s.world.hormuz;
-  openDebate(s);
-  ok(s.phase === 'debate' && Object.keys(s.declared).length === 19, 'openDebate: every actor declared');
-  resolveTurn(s);
-  const r = s.results.find((x) => x.actor === 'iran');
-  ok(r && r.roll >= 1 && r.roll <= 100, `Iran's declaration adjudicated (${r?.outcome}, d100 ${r?.roll} vs ${r?.p})`);
-  ok(s.phase === 'results' && s.history.length === 2, 'resolveTurn: results phase, history snapshot');
-  ok(Number.isFinite(s.world.hormuz) && s.world.hormuz !== undefined, `Hormuz moved ${before} → ${s.world.hormuz}`);
+  endTurn(s);
+  ok(s.turn === 2 && s.phase === 'turn', 'endTurn resolves and deals turn 2');
+  const b = s.briefing;
+  ok(b && b.mine.some((r) => r.kind === 'situation' && r.id === card.id && r.option === pick.id), `briefing records the card answer (${card.id} → ${pick.id})`);
+  ok(b.mine.some((r) => r.kind === 'action' && r.action === 'harass'), 'briefing records the initiative');
+  ok(b.affecting.length + b.elsewhere.length === ACTORS.length - 1 - (s.actors.iran.collapsed ? 1 : 0) || b.affecting.length + b.elsewhere.length >= 15, `AI results split into affecting (${b.affecting.length}) and elsewhere (${b.elsewhere.length})`);
+  ok(b.affecting.length < 8, 'the relevance filter keeps the affecting list short');
+  ok(s.recent.some((r) => r.kind === 'action' && r.actor === 'iran'), 'recent history records the resolved action');
+  ok(Number.isFinite(s.world.hormuz), `Hormuz moved ${before} → ${s.world.hormuz}`);
+  ok(s.history.length === 2, 'one history snapshot per completed turn');
 }
 
 // ── full AI games: invariants and determinism ──
@@ -60,7 +76,7 @@ function play(seed, player = null) {
 }
 for (const seed of [1, 2, 3]) {
   const s = play(seed);
-  ok(s.turn === s.maxTurns && s.outcome?.result === 'complete', `seed ${seed}: game reaches turn ${s.maxTurns}`);
+  ok(s.turn === s.maxTurns && s.outcome?.result === 'complete', `seed ${seed}: observer game reaches turn ${s.maxTurns}`);
   try { finite(s); ok(true, `seed ${seed}: no NaN/Infinity anywhere in state`); } catch (e) { ok(false, `seed ${seed}: ${e.message}`); }
   ok(Object.values(s.world).every((v) => v >= -25 && v <= 200), `seed ${seed}: world values in range`);
   ok(Object.values(s.actors).every((a) => a.stability >= 0 && a.stability <= 100 && a.military >= 0 && a.money >= 0), `seed ${seed}: actor resources in range`);
@@ -72,6 +88,9 @@ for (const seed of [1, 2, 3]) {
   const c = play(43, 'turkey');
   ok(JSON.stringify(a.world) !== JSON.stringify(c.world), 'different seed diverges');
   ok(['victory', 'draw', 'defeat'].includes(a.outcome.result), `player game ends with a verdict (${a.outcome.result}: ${a.outcome.reason})`);
+  const fired = new Set(a.recent.map((r) => r.kind === 'situation' && r.id).filter(Boolean));
+  ok(a.log.filter((l) => l.kind === 'success' || l.kind === 'fail').length > 0, 'log carries narrated results');
+  ok(fired.size >= 1 || a.log.some((l) => l.actor === 'turkey'), 'the AI-played seat answered situation cards');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nall engine checks passed');

@@ -43,7 +43,7 @@ export const STATES = [
   },
   {
     id: 'il_coalition', who: ['israel'], kind: 'crisis', priority: 60, cooldown: 4,
-    when: (h) => h.me.stability < 45,
+    when: (h) => h.me.stability < 50,
     at: 'israelHome',
     title: 'Coalition crisis',
     text: () => 'The draft-exemption bill is dead, the Haredi parties are threatening to walk, and the opposition has the signatures to dissolve the Knesset. The reservists have been called up four times in a year.',
@@ -83,7 +83,7 @@ export const STATES = [
   },
   {
     id: 'il_saudi_signal', who: ['israel'], kind: 'opportunity', priority: 50, cooldown: 4,
-    when: (h) => h.w.normalization >= 25 && h.w.humanitarian >= 35,
+    when: (h) => h.w.normalization >= 15 && h.w.humanitarian >= 30,
     at: 'riyadh',
     title: 'Riyadh signals',
     text: () => 'Through Washington: the Crown Prince would move on normalization this winter if Israel freezes settlement expansion and says the words "pathway to a Palestinian state". The coalition would rather lose Riyadh than say them.',
@@ -100,7 +100,7 @@ export const STATES = [
   },
   {
     id: 'il_syria_south', who: ['israel'], kind: 'opportunity', priority: 45, cooldown: 4,
-    when: (h) => h.alive('syria') && (h.T('southSyria').tension >= 50 || h.A('syria').stability < 40),
+    when: (h) => h.alive('syria') && (h.T('southSyria').tension >= 40 || h.A('syria').stability < 45),
     at: 'southSyria',
     title: 'The Druze of Sweida ask for protection',
     text: () => 'Sweida\'s militias are fighting government forces again and asking Israel to intervene. The buffer zone could grow; so could the war with Damascus and the quarrel with Ankara.',
@@ -116,7 +116,7 @@ export const STATES = [
   },
   {
     id: 'il_washington', who: ['israel'], kind: 'crisis', priority: 58, cooldown: 4,
-    when: (h) => h.relOf('us') < 60 || h.flag('us_pivot'),
+    when: (h) => h.relOf('us') < 70 || h.flag('us_pivot'),
     at: 'israelHome',
     title: 'Washington is cooling',
     text: (h) => `${h.flag('us_pivot') ? 'The pivot to a deal with Iran is official policy.' : 'Arms deliveries are slowing and the phone calls are shorter.'} The embassy says the price of restoring the relationship is restraint on Iran and movement in Gaza.`,
@@ -220,12 +220,12 @@ export const STATES = [
   },
   {
     id: 'ir_axis_call', who: ['iran'], kind: 'opportunity', priority: 50, cooldown: 3,
-    when: (h) => ['hezbollah', 'houthis', 'iraqMilitias'].some((a) => h.alive(a) && h.A(a).military < 32),
-    at: (h) => { const a = ['hezbollah', 'houthis', 'iraqMilitias'].find((x) => h.alive(x) && h.A(x).military < 32); return { hezbollah: 'southLebanon', houthis: 'northYemen', iraqMilitias: 'baghdad' }[a]; },
-    title: (h) => `${h.name(['hezbollah', 'houthis', 'iraqMilitias'].find((x) => h.alive(x) && h.A(x).military < 32))} begs for resupply`,
-    text: (h) => { const a = ['hezbollah', 'houthis', 'iraqMilitias'].find((x) => h.alive(x) && h.A(x).military < 32); return `${h.name(a)}'s commanders say they are down to weeks of missiles. ${a === 'hezbollah' ? 'The Syrian route is gone; what gets through comes by sea or not at all.' : a === 'houthis' ? 'Dhows from Chabahar are being boarded by the Americans.' : 'The Iraqi border is open, but so are American eyes.'}`; },
+    when: (h) => ['hezbollah', 'houthis', 'iraqMilitias'].some((a) => h.alive(a) && h.A(a).military < 36),
+    at: (h) => { const a = ['hezbollah', 'houthis', 'iraqMilitias'].find((x) => h.alive(x) && h.A(x).military < 36); return { hezbollah: 'southLebanon', houthis: 'northYemen', iraqMilitias: 'baghdad' }[a]; },
+    title: (h) => `${h.name(['hezbollah', 'houthis', 'iraqMilitias'].find((x) => h.alive(x) && h.A(x).military < 36))} begs for resupply`,
+    text: (h) => { const a = ['hezbollah', 'houthis', 'iraqMilitias'].find((x) => h.alive(x) && h.A(x).military < 36); return `${h.name(a)}'s commanders say they are down to weeks of missiles. ${a === 'hezbollah' ? 'The Syrian route is gone; what gets through comes by sea or not at all.' : a === 'houthis' ? 'Dhows from Chabahar are being boarded by the Americans.' : 'The Iraqi border is open, but so are American eyes.'}`; },
     options: (h) => {
-      const a = ['hezbollah', 'houthis', 'iraqMilitias'].find((x) => h.alive(x) && h.A(x).military < 32);
+      const a = ['hezbollah', 'houthis', 'iraqMilitias'].find((x) => h.alive(x) && h.A(x).military < 36);
       return [
         fromAction(h, 'armProxy', a, { id: 'arms', label: 'Run the shipment', text: 'Missiles and drones through whatever route still works.' }),
         opt({ id: 'cash', label: 'Cash through the hawala', text: 'Money moves where missiles cannot.', cost: C(6, 0, 0), success: (h2) => { h2.res(a, { money: 6, stability: 3 }); h2.rel('iran', a, 5); }, say: { success: 'The money arrived; the missiles will have to wait.' } }),
@@ -235,7 +235,7 @@ export const STATES = [
   },
   {
     id: 'ir_nuclear_decision', who: ['iran'], kind: 'opportunity', priority: 60, cooldown: 5,
-    when: (h) => h.w.iranNuclear >= 60,
+    when: (h) => h.w.iranNuclear >= 55,
     at: 'nuclearSites',
     title: 'The scientists say a device is within reach',
     text: () => 'The program chief reports enough material for two devices and a test site surveyed in the Dasht-e Kavir. A test would change everything: deterrence, the siege, the regime\'s survival, and the odds of an Israeli strike before it happens.',
@@ -367,7 +367,7 @@ export const STATES = [
   },
   {
     id: 'tr_israel_clash', who: ['turkey'], kind: 'crisis', priority: 55, cooldown: 4,
-    when: (h) => h.alive('israel') && (h.infOf('southSyria', 'israel') >= 45 || h.did('israel', ['strike', 'offensive'], ['damascus', 'southSyria'], 1)),
+    when: (h) => h.alive('israel') && (h.infOf('southSyria', 'israel') >= 35 || h.did('israel', ['strike', 'offensive'], ['damascus', 'southSyria'], 1)),
     at: 'damascus',
     title: 'Israeli jets over Turkish positions in Syria',
     text: () => 'Israeli aircraft struck a convoy within sight of the Turkish base at T4. Ankara and Jerusalem are a radar lock away from a NATO member shooting at an American ally.',
@@ -449,7 +449,7 @@ export const STATES = [
   },
   {
     id: 'sa_normalization_price', who: ['saudi'], kind: 'opportunity', priority: 55, cooldown: 4,
-    when: (h) => h.w.normalization >= 20 && h.relOf('us') >= 35 && h.alive('israel'),
+    when: (h) => h.w.normalization >= 15 && h.relOf('us') >= 35 && h.alive('israel'),
     at: 'riyadh',
     title: 'Washington\'s offer on normalization',
     text: () => 'A defense treaty, a civilian nuclear program and F-35s, in exchange for normalization with Israel. The price is set; the question is whether to demand a Palestinian pathway that Jerusalem will not give.',
@@ -492,7 +492,7 @@ export const STATES = [
   },
   {
     id: 'sa_vision', who: ['saudi'], kind: 'crisis', priority: 50, cooldown: 4,
-    when: (h) => h.me.money < 45 && h.w.oil < 92,
+    when: (h) => h.me.money < 50 && h.w.oil < 95,
     at: 'riyadh',
     title: 'NEOM contractors unpaid',
     text: () => 'The giga-projects are eating reserves the war has not replaced. Contractors are owed billions; the Public Investment Fund wants to pause the Line; the Crown Prince does not want to hear it.',
@@ -521,7 +521,7 @@ export const STATES = [
   },
   {
     id: 'sa_guarantee', who: ['saudi'], kind: 'opportunity', priority: 48, cooldown: 5,
-    when: (h) => h.did('iran', ['strike'], ['riyadh', 'gulfBases'], 2) || h.T('gulfBases').tension >= 60,
+    when: (h) => h.did('iran', ['strike'], ['riyadh', 'gulfBases'], 2) || h.T('gulfBases').tension >= 50 || h.w.warIntensity >= 60,
     at: 'gulfBases',
     title: 'Who defends the Kingdom?',
     text: () => 'Iranian missiles over the Gulf have exposed the air-defense gaps. Washington offers a formal guarantee with conditions; Beijing offers HQ-9 batteries with none.',
@@ -656,7 +656,7 @@ export const STATES = [
   },
   {
     id: 'sy_israel', who: ['syria'], kind: 'crisis', priority: 60, cooldown: 3,
-    when: (h) => h.alive('israel') && (h.infOf('southSyria', 'israel') >= 40 || h.did('israel', ['strike', 'offensive'], ['southSyria', 'damascus'], 1)),
+    when: (h) => h.alive('israel') && (h.infOf('southSyria', 'israel') >= 30 || h.did('israel', ['strike', 'offensive'], ['southSyria', 'damascus'], 1)),
     at: 'southSyria',
     title: 'Israel in the south',
     text: (h) => `${h.did('israel', ['strike', 'offensive'], ['southSyria', 'damascus'], 1) ? 'Israeli forces struck again this fortnight.' : 'Israeli troops sit on the Sweida road and in the Quneitra buffer.'} The army cannot fight them; the public cannot accept them; Ankara and Riyadh both say they can mediate.`,
@@ -717,7 +717,7 @@ export const STATES = [
   },
   {
     id: 'sy_sweida', who: ['syria'], kind: 'crisis', priority: 55, cooldown: 4,
-    when: (h) => h.event('sweidaClashes', 1) || h.T('southSyria').tension >= 60,
+    when: (h) => h.event('sweidaClashes', 1) || h.T('southSyria').tension >= 50,
     at: 'southSyria',
     title: 'Sweida rises',
     text: () => 'Druze militias have pushed government units out of Sweida city and are asking Israel for cover. The Bedouin tribes want to retake it; the Jordanians want it quiet; nobody wants a second Alawite coast.',
@@ -833,7 +833,7 @@ export const STATES = [
   // ═══════════════════════ KURDISTAN REGION ═══════════════════════
   {
     id: 'krg_drones', who: ['krg'], kind: 'crisis', priority: 60, cooldown: 3,
-    when: (h) => h.event('militiaDrone', 1) || h.did(['iran', 'iraqMilitias'], ['strike', 'offensive'], 'kurdistan', 1),
+    when: (h) => h.event('militiaDrone', 1) || h.did(['iran', 'iraqMilitias'], ['strike', 'offensive'], 'kurdistan', 1) || h.T('kurdistan').tension >= 50,
     at: 'kurdistan',
     title: 'Drones over Erbil',
     text: (h) => `${h.did('iran', null, 'kurdistan', 1) ? 'Iranian' : 'Militia'} drones struck near Erbil again. Tehran says the Region shelters Iranian Kurdish groups; Baghdad says it cannot control the militias; Washington is no longer at the airbase.`,
@@ -880,7 +880,7 @@ export const STATES = [
   },
   {
     id: 'krg_budget', who: ['krg'], kind: 'crisis', priority: 50, cooldown: 4,
-    when: (h) => h.infOf('baghdad', 'iraqMilitias') >= 60,
+    when: (h) => h.infOf('baghdad', 'iraqMilitias') >= 55,
     at: 'baghdad',
     title: 'Baghdad cuts the budget',
     text: () => 'The militia-aligned bloc in parliament has cut the Region\'s share of the federal budget again, citing unauthorized oil sales. Salaries will stop within the month.',

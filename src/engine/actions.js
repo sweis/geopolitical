@@ -612,10 +612,10 @@ export const ACTIONS = [
     id: 'withdraw', name: 'Draw down forces', cat: 'military', target: 'theater', who: ['us', 'israel', 'turkey', 'russia'],
     cost: { money: 0, military: 0, political: 1 }, base: 0.9,
     desc: 'Bring troops home. Saves money and goodwill at home; cedes ground.',
-    targets: (s, a) => Object.keys(s.theaters).filter((t) => t !== homeOf(a) && (s.theaters[t].infl[a] || 0) >= 10),
+    targets: (s, a) => Object.keys(s.theaters).filter((t) => t !== homeOf(a) && (s.theaters[t].infl[a] || 0) >= 20),
     mods: () => [],
     success: (s, a, t) => {
-      infl(s, t, a, -25); res(s, a, { money: 6, military: 4 });
+      infl(s, t, a, -25); res(s, a, { money: 4, military: 3 });
       if (a === 'us') W(s, 'usWarSupport', 5);
       if (t === 'hormuz') W(s, 'hormuz', -8);
       if (t === 'babElMandeb' || t === 'redSea') W(s, 'redSea', -6);

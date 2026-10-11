@@ -188,7 +188,7 @@ export const POWERS = [
   },
   {
     id: 'us_houthi_ask', who: ['us'], kind: 'opportunity', priority: 50, cooldown: 4,
-    when: (h) => h.alive('houthis') && h.w.yemenWar >= 40 && (h.event('saudiAirport') || h.did('houthis', 'strike', 'riyadh', 1)),
+    when: (h) => h.alive('houthis') && h.w.yemenWar >= 40 && (h.event('saudiAirport', 2) || h.did('houthis', 'strike', 'riyadh', 2) || h.w.redSea < 40),
     at: 'northYemen',
     title: 'Riyadh asks America to join the fight against the Houthis',
     text: () => 'After the strike on the airport, the Crown Prince is asking directly: will the United States strike Houthi launch sites, or only defend ships? The answer sets the price of everything else you want from Riyadh.',
@@ -200,7 +200,7 @@ export const POWERS = [
   },
   {
     id: 'us_china_oil', who: ['us'], kind: 'opportunity', priority: 44, cooldown: 4,
-    when: (h) => h.did('china', 'buyOil', null, 2),
+    when: (h) => h.did('china', 'buyOil', null, 2) || (h.w.iranSanctions >= 70 && h.A('iran').money >= 30 && h.relOf('china') < 0),
     at: 'hormuz',
     title: 'Chinese teapots are keeping Tehran afloat',
     text: () => 'Treasury has the tanker tracks: Chinese independent refiners took millions of barrels of Iranian crude last fortnight. Sanctioning them hits China; ignoring them hollows out the siege.',
@@ -291,7 +291,7 @@ export const POWERS = [
   },
   {
     id: 'eu_refugees', who: ['eu'], kind: 'crisis', priority: 52, cooldown: 4,
-    when: (h) => h.A('lebanon').stability < 35 || h.A('syria').stability < 35 || h.w.humanitarian < 20,
+    when: (h) => h.A('lebanon').stability < 42 || h.A('syria').stability < 42 || h.w.humanitarian < 25,
     at: 'beirut',
     title: 'Boats are leaving again',
     text: (h) => `${h.A('lebanon').stability < 35 ? 'Lebanon' : h.A('syria').stability < 35 ? 'Syria' : 'Gaza'} is emptying toward Cyprus and the Aegean. Interior ministers want a deal with the transit states before the spring sailing season.`,
@@ -304,7 +304,7 @@ export const POWERS = [
   },
   {
     id: 'eu_rift', who: ['eu'], kind: 'opportunity', priority: 45, cooldown: 5,
-    when: (h) => h.relOf('us') < 30,
+    when: (h) => h.relOf('us') < 40,
     at: 'gulfBases',
     title: 'The transatlantic rift',
     text: () => 'Washington is not consulting and is not listening. Paris wants strategic autonomy made real; Warsaw wants the Americans kept close at any price.',
@@ -369,7 +369,7 @@ export const POWERS = [
   },
   {
     id: 'ru_opec', who: ['russia'], kind: 'opportunity', priority: 40, cooldown: 4,
-    when: (h) => h.w.oil < 95,
+    when: (h) => h.w.oil < 100,
     at: 'riyadh',
     title: 'OPEC+ discipline',
     text: (h) => `Brent at $${h.w.oil} is not enough to fund the war in Ukraine and the war chest at home. Riyadh is pumping for Washington; a coordinated cut needs the Saudis on board.`,
@@ -414,7 +414,7 @@ export const POWERS = [
   },
   {
     id: 'ru_houthi_data', who: ['russia'], kind: 'opportunity', priority: 42, cooldown: 5,
-    when: (h) => h.alive('houthis') && h.w.redSea >= 45 && h.w.oil < 100,
+    when: (h) => h.alive('houthis') && h.w.redSea >= 40,
     at: 'babElMandeb',
     title: 'The Houthis ask for targeting data',
     text: () => 'Sana\'a wants satellite tracks of Western shipping. Every ship they hit raises the oil price you live on; every ship they hit with Russian data is a step closer to open confrontation with the West.',
@@ -462,7 +462,7 @@ export const POWERS = [
   },
   {
     id: 'cn_us_demand', who: ['china'], kind: 'crisis', priority: 56, cooldown: 4,
-    when: (h) => h.did('us', 'sanctions', 'china', 1) || h.relOf('us') <= -55,
+    when: (h) => h.did('us', 'sanctions', 'china', 2) || h.relOf('us') <= -45,
     at: 'hormuz',
     title: 'Washington demands a choice',
     text: (h) => `${h.did('us', 'sanctions', 'china', 1) ? 'Treasury has sanctioned your refiners and their banks.' : 'Washington has delivered an ultimatum.'} Stop buying Iranian crude or face secondary sanctions across the banking sector. The teapots are small; the banks are not.`,

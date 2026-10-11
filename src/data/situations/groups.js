@@ -84,7 +84,7 @@ export const GROUPS = [
   },
   {
     id: 'hz_syria_route', who: ['hezbollah'], kind: 'opportunity', priority: 45, cooldown: 5,
-    when: (h) => h.alive('syria') && h.relOf('syria') >= -40 && h.relOf('syria') < 20,
+    when: (h) => h.alive('syria') && h.relOf('syria') >= -65 && h.relOf('syria') < 20,
     at: 'damascus',
     title: 'A deal with Damascus?',
     text: () => 'Al-Sharaa\'s government hates the party but needs money and quiet on the border. A paid arrangement for a resupply corridor is possible; so is a trap.',
@@ -112,7 +112,7 @@ export const GROUPS = [
   // ═══════════════════════ HAMAS ═══════════════════════
   {
     id: 'hm_decommission', who: ['hamas'], kind: 'crisis', priority: 75, cooldown: 3,
-    when: (h) => h.w.hamasDisarm >= 15 || h.did(['us', 'egypt', 'turkey', 'eu', 'israel'], 'disarm', 'gaza', 1),
+    when: (h) => h.w.hamasDisarm >= 8 || h.w.isfDeployed >= 30 || h.did(['us', 'egypt', 'turkey', 'eu', 'israel'], 'disarm', 'gaza', 1),
     at: 'gaza',
     title: 'The committee demands the first handover',
     text: (h) => `Under the July roadmap the technocratic committee wants the first tunnel network and the heavy weapons handed to the stabilization force. ${h.infOf('gaza', 'israel') >= 50 ? 'Israel has not withdrawn a metre.' : 'Israel has pulled back as promised.'} The Brigades say handing over anything is surrender.`,
@@ -185,7 +185,7 @@ export const GROUPS = [
   },
   {
     id: 'hm_exile', who: ['hamas'], kind: 'opportunity', priority: 45, cooldown: 5,
-    when: (h) => h.relOf('turkey') >= 30 && h.w.hamasDisarm >= 25,
+    when: (h) => h.relOf('turkey') >= 30 && h.w.hamasDisarm >= 15,
     at: 'ankara',
     title: 'Ankara offers an exit',
     text: () => 'Turkey will take the senior commanders and their families, with guarantees, if the movement completes decommissioning. It is a way out of Gaza for the leadership and a way out of the movement for Gaza.',
@@ -224,7 +224,7 @@ export const GROUPS = [
   },
   {
     id: 'pij_hamas_pressure', who: ['pij'], kind: 'crisis', priority: 60, cooldown: 3,
-    when: (h) => h.alive('hamas') && h.w.hamasDisarm >= 20,
+    when: (h) => h.alive('hamas') && h.w.hamasDisarm >= 12,
     at: 'gaza',
     title: 'Hamas tells you to stand down',
     text: () => 'The Brigades have the roadmap to protect and the crossings to lose. They are telling PIJ to stop launching, stop recruiting and hand over its share. They have more men than you.',
@@ -306,7 +306,7 @@ export const GROUPS = [
   },
   {
     id: 'ho_internal', who: ['houthis'], kind: 'crisis', priority: 55, cooldown: 4,
-    when: (h) => h.me.stability < 48,
+    when: (h) => h.me.stability < 52,
     at: 'northYemen',
     title: 'The tribes want their salaries',
     text: () => 'Unpaid tribal levies in Hajjah and al-Jawf are refusing to deploy and talking to the Saudis. The leadership council blames Saudi bribes; the tribes blame the leadership council.',
@@ -318,7 +318,7 @@ export const GROUPS = [
   },
   {
     id: 'ho_weapons', who: ['houthis'], kind: 'opportunity', priority: 50, cooldown: 4,
-    when: (h) => h.me.military < 40 && h.alive('iran') && h.relOf('iran') >= 40,
+    when: (h) => h.me.military < 45 && h.alive('iran') && h.relOf('iran') >= 40,
     at: 'babElMandeb',
     title: 'A shipment from Chabahar',
     text: () => 'Tehran has missile components ready to sail. The dhows have a fair chance of getting past the Americans; the overland route through Oman is slower and safer.',
@@ -354,12 +354,12 @@ export const GROUPS = [
   // ═══════════════════════ IRAQI MILITIAS ═══════════════════════
   {
     id: 'im_us_targets', who: ['iraqMilitias'], kind: 'opportunity', priority: 55, cooldown: 3,
-    when: (h) => h.alive('us') && (h.infOf('baghdad', 'us') >= 10 || h.infOf('kurdistan', 'us') >= 15 || h.infOf('neSyria', 'us') >= 10),
-    at: (h) => (h.infOf('kurdistan', 'us') >= 15 ? 'kurdistan' : h.infOf('neSyria', 'us') >= 10 ? 'neSyria' : 'baghdad'),
+    when: (h) => h.alive('us') && (h.infOf('baghdad', 'us') >= 5 || h.infOf('kurdistan', 'us') >= 10 || h.infOf('neSyria', 'us') >= 5),
+    at: (h) => (h.infOf('kurdistan', 'us') >= 10 ? 'kurdistan' : h.infOf('neSyria', 'us') >= 5 ? 'neSyria' : 'baghdad'),
     title: 'Americans within reach',
-    text: (h) => `${h.infOf('kurdistan', 'us') >= 15 ? 'American advisers are back at Harir.' : h.infOf('neSyria', 'us') >= 10 ? 'The last American positions in Syria are still there.' : 'American contractors remain at the embassy.'} The Resistance promised the withdrawal would be complete.`,
+    text: (h) => `${h.infOf('kurdistan', 'us') >= 10 ? 'American advisers are back at Harir.' : h.infOf('neSyria', 'us') >= 5 ? 'The last American positions in Syria are still there.' : 'American contractors remain at the embassy.'} The Resistance promised the withdrawal would be complete.`,
     options: (h) => {
-      const t = h.infOf('kurdistan', 'us') >= 15 ? 'kurdistan' : h.infOf('neSyria', 'us') >= 10 ? 'neSyria' : 'baghdad';
+      const t = h.infOf('kurdistan', 'us') >= 10 ? 'kurdistan' : h.infOf('neSyria', 'us') >= 5 ? 'neSyria' : 'baghdad';
       return [
         fromAction(h, 'strike', t, { id: 'drones', label: 'Drone the positions', text: 'Make the presence expensive.', success: (h2) => { h2.inf(t, 'us', -8); h2.res('iraqMilitias', { political: 1 }); } }),
         opt({ id: 'politics', label: 'Expel them through parliament', text: 'A vote on the remaining presence.', cost: C(0, 0, 2), odds: 0.5, reasons: (h2) => [...(h2.infOf('baghdad') >= 60 ? [{ text: 'You control the chamber', d: 0.15 }] : [])], success: (h2) => { h2.inf(t, 'us', -10); h2.res('iraqMilitias', { political: 2 }); }, fail: (h2) => { h2.res('iraqMilitias', { political: -1 }); }, say: { success: 'Parliament voted the Americans out again, and this time they went.', fail: 'The Kurds and Sunnis blocked the quorum.' }, default: true }),
@@ -474,7 +474,7 @@ export const GROUPS = [
   },
   {
     id: 'sdf_tribes', who: ['sdf'], kind: 'crisis', priority: 50, cooldown: 4,
-    when: (h) => h.me.stability < 46,
+    when: (h) => h.me.stability < 52,
     at: 'neSyria',
     title: 'The Arab tribes of Deir ez-Zor',
     text: () => 'The tribes east of the river are refusing orders, taking Damascus\'s money and asking why Kurds command Arabs. A revolt there would cut the northeast in two.',

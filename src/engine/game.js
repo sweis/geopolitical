@@ -1,15 +1,18 @@
-// Turn controller. Phases per turn (matrix-game order):
-//   declare  – the player picks an action, target and commitment; the GM shows the odds and reasons.
-//   debate   – every other actor declares; actors argue for/against each declaration; the player
-//              may argue on the declarations that touch their goals.
-//   results  – declarations resolve in random initiative order, then upkeep, events and end checks.
+// Turn controller. One player-facing phase per turn:
+//   turn  – the director has dealt situation cards (crises, opportunities, an intelligence card) and
+//           ranked initiatives; every other actor has already declared its move. The player answers
+//           the cards, optionally picks one initiative, and ends the turn.
+//   endTurn resolves the player's responses, then all declared moves in random initiative order (rolls
+//   are hidden), runs upkeep and events, compiles a briefing of what mattered to the player, and deals
+//   the next turn.
 import { ACTORS, ACTOR_BY_ID } from '../data/actors.js';
 import { EVENTS, EVENT_BY_ID, SCRIPTED, THRESHOLDS } from '../data/events.js';
 import { ACTION_BY_ID, affordable, canUse, ACTIONS } from './actions.js';
-import { createState, clamp, deriveWorld, W, res, alive, dateOf, infl } from './state.js';
+import { createState, clamp, deriveWorld, W, res, alive, dateOf, infl, homeOf } from './state.js';
 import { resolve as resolveDecl, evaluate, band, payCost } from './adjudicate.js';
-import { chooseAction, aiArguments, argWeight, reserved, ARGUE_THRESHOLD } from './ai.js';
+import { chooseAction, aiArguments, planArgs } from './ai.js';
 import { goalScore, goalReport } from './goals.js';
+import { generateSituations, resolveSituations, compileBriefing, snapshotFor, impactSince, chooseOptionAI, proposals, ordersTotal } from './director.js';
 import { rand } from './rng.js';
 
 // Victory means materially improving your position: reach VICTORY_FLOOR, gain VICTORY_GAIN points over
@@ -21,115 +24,130 @@ export function thresholds(s, id) {
   return { start, victory: Math.min(95, Math.max(VICTORY_FLOOR, start + VICTORY_GAIN)), draw: start - DRAW_SLACK, metNeeded: Math.ceil(n / 2) };
 }
 
+const log = (s, kind, text, extra = {}) => s.log.push({ turn: s.turn, kind, text, ...extra });
+
 export function newGame(opts = {}) {
   const s = createState(opts);
-  s.log.push({ turn: 1, kind: 'brief', text: `${dateOf(1)} — The war with Iran is in its eighth month. Hormuz is choked, Brent is $${s.world.oil}, and Washington is weighing a new bombing campaign before the midterms.` });
+  log(s, 'brief', `${dateOf(1)} — The war with Iran is in its eighth month. Hormuz is choked, Brent is $${s.world.oil}, and Washington is weighing a new bombing campaign before the midterms.`);
   snapshot(s, 0);
+  beginTurn(s, true);
   return s;
 }
 
-const log = (s, kind, text, extra = {}) => s.log.push({ turn: s.turn, kind, text, ...extra });
+// ── turn start ──
+export function beginTurn(s, first = false) {
+  if (!first) s.turn += 1;
+  s.declared = {}; s.argUsed = {}; s.orders = { initiative: null }; s.results = []; s.news = [];
+  for (const id of alive(s)) {
+    if (id === s.player) continue;
+    const c = chooseAction(s, id);
+    if (c) s.declared[id] = { actor: id, action: c.action, target: c.target, commit: c.commit, args: [] };
+  }
+  aiArguments(s, Object.values(s.declared), s.player); // AI actors argue among themselves; also computes stakes
+  generateSituations(s);
+  s.phase = 'turn';
+}
 
-// ── declare ──
+// ── player orders ──
+export function choose(s, sitId, optId) {
+  const sit = s.situations.find((x) => x.id === sitId);
+  if (!sit) throw new Error(`no situation ${sitId}`);
+  if (optId != null && !sit.options.find((o) => o.id === optId)) throw new Error(`no option ${optId}`);
+  sit.choice = optId;
+}
+
+export function setInitiative(s, action, target = null, commit = 0) {
+  const p = s.player;
+  const act = ACTION_BY_ID[action];
+  if (!act || !canUse(act, p)) throw new Error(`${p} cannot use ${action}`);
+  if (!affordable(s, p, act, commit)) throw new Error(`${p} cannot afford ${action}`);
+  if (!act.targets(s, p).includes(target)) throw new Error(`bad target ${target} for ${action}`);
+  s.orders.initiative = { action, target, commit };
+}
+export function clearInitiative(s) { s.orders.initiative = null; }
+
+// The full catalogue, for the "all orders" list.
 export function playerMenu(s) {
   const a = s.player;
-  return ACTIONS.filter((act) => canUse(act, a)).map((act) => ({
+  return ACTIONS.filter((act) => canUse(act, a) && act.id !== 'hold').map((act) => ({
     id: act.id, name: act.name, cat: act.cat, desc: act.desc, target: act.target, cost: act.cost,
     targets: act.targets(s, a), affordable: affordable(s, a, act, 0),
   }));
 }
 
-export function declare(s, actor, action, target, commit = 0) {
-  const act = ACTION_BY_ID[action];
-  if (!act || !canUse(act, actor)) throw new Error(`${actor} cannot use ${action}`);
-  if (!affordable(s, actor, act, commit)) throw new Error(`${actor} cannot afford ${action}`);
-  const t = act.targets(s, actor);
-  if (!t.includes(target)) throw new Error(`bad target ${target} for ${action}`);
-  s.declared[actor] = { actor, action, target, commit, args: [] };
+// Odds for an initiative, including the opposition and support it is expected to meet.
+export function previewInitiative(s, action, target = null, commit = 0) {
+  const p = s.player;
+  const decl = { actor: p, action, target, commit, args: [] };
+  const planned = planArgs(s, [decl], p, false);
+  const ev = evaluate(s, p, action, target, commit, planned);
+  return { ...ev, args: planned.map((a) => ({ by: a.by, stance: a.stance })) };
 }
+export const preview = previewInitiative;
+export { proposals, ordersTotal };
 
-// ── debate ──
-export function openDebate(s) {
-  for (const id of alive(s)) {
-    if (s.declared[id]) continue;
-    const c = chooseAction(s, id);
-    if (c) s.declared[id] = { actor: id, action: c.action, target: c.target, commit: c.commit, args: [] };
-  }
-  const decls = Object.values(s.declared);
-  aiArguments(s, decls, s.player);
-  s.debate = [];
-  if (s.player && !s.actors[s.player].collapsed) {
-    for (const d of decls) {
-      if (d.actor === s.player) continue;
-      const delta = d.stakes?.[s.player] ?? 0;
-      if (Math.abs(delta) >= ARGUE_THRESHOLD) s.debate.push({ actor: d.actor, delta: +delta.toFixed(2), choice: 0 });
+// ── turn end ──
+function shuffle(s, arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rand(s) * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
+
+export function endTurn(s) {
+  if (s.phase !== 'turn') return;
+  const p = s.player;
+  const pdef = p ? ACTOR_BY_ID[p] : null;
+  const scoreBefore = p ? goalScore(pdef, s) : 0;
+  const worldBefore = { ...s.world };
+  s.results = []; s.news = [];
+  // 1. The player's responses to the situation cards.
+  const mine = p ? resolveSituations(s) : [];
+  // 2. The player's initiative joins the declarations.
+  if (p && !s.actors[p].collapsed) {
+    const init = s.orders.initiative ?? { action: 'hold', target: null, commit: 0 };
+    const act = ACTION_BY_ID[init.action];
+    if (act.targets(s, p).includes(init.target) && affordable(s, p, act, init.commit)) {
+      s.declared[p] = { actor: p, ...init, args: [] };
+      planArgs(s, [s.declared[p]], p, true);
+    } else {
+      mine.push({ kind: 'action', actor: p, action: init.action, target: init.target, outcome: 'fizzle', ok: false, p: 0, roll: 0, text: `${act.name} could no longer be carried out: resources were spent on the crises of the fortnight.`, impact: null });
     }
-    s.debate.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
-    s.debate = s.debate.slice(0, 5);
   }
-  s.phase = 'debate';
-}
-
-// stance: +1 support, -1 oppose, 0 abstain. Costs 1 political capital.
-export function argue(s, actorOfDecl, stance) {
-  const item = s.debate.find((x) => x.actor === actorOfDecl);
-  const d = s.declared[actorOfDecl];
-  if (!item || !d) throw new Error('no such debate item');
-  const me = s.actors[s.player];
-  if (item.choice !== 0) { d.args = d.args.filter((x) => x.by !== s.player); me.political += 1; item.choice = 0; }
-  if (stance === 0) return;
-  if (me.political - reserved(s, s.player) < 1) throw new Error('no spare political capital');
-  me.political -= 1;
-  item.choice = stance;
-  d.args.push({ by: s.player, stance, d: stance * argWeight(s.player), text: `${ACTOR_BY_ID[s.player].name} ${stance > 0 ? 'backs the move' : 'argues against it'}`, player: true });
-}
-
-export function preview(s, actor, action, target, commit = 0) {
-  return evaluate(s, actor, action, target, commit, s.declared[actor]?.args ?? []);
-}
-
-// ── results ──
-export function resolveTurn(s) {
-  if (s.phase !== 'debate') openDebate(s);
-  const order = Object.values(s.declared);
-  for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rand(s) * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
-  s.results = [];
-  for (const d of order) {
+  // 3. Resolve every declaration in random initiative order.
+  const others = [];
+  for (const d of shuffle(s, Object.values(s.declared))) {
     if (s.actors[d.actor].collapsed) continue;
     const act = ACTION_BY_ID[d.action];
-    // State may have shifted since declaration; fizzle if the target is no longer valid or unaffordable.
     if (!act.targets(s, d.actor).includes(d.target) || !affordable(s, d.actor, act, d.commit)) {
-      s.results.push({ actor: d.actor, action: d.action, target: d.target, outcome: 'fizzle', ok: false, p: 0, roll: 0, text: `${ACTOR_BY_ID[d.actor].name}'s plan (${act.name}) was overtaken by events.` });
+      const r = { kind: 'action', actor: d.actor, action: d.action, target: d.target, outcome: 'fizzle', ok: false, p: 0, roll: 0, text: `${ACTOR_BY_ID[d.actor].name}'s plan (${act.name}) was overtaken by events.`, impact: null };
+      (d.actor === p ? mine : others).push(r); s.results.push(r);
       continue;
     }
-    payCost(s, d.actor, d.action, d.commit); // cost is paid at resolution
+    payCost(s, d.actor, d.action, d.commit);
+    const before = p ? snapshotFor(s, p) : null;
     const r = resolveDecl(s, d);
+    r.impact = p ? impactSince(s, p, before) : null;
+    (d.actor === p ? mine : others).push(r);
     s.results.push(r);
+    s.recent.push({ turn: s.turn, kind: 'action', actor: d.actor, action: d.action, target: d.target, ok: r.ok, outcome: r.outcome, text: r.text });
     log(s, r.ok ? 'success' : 'fail', r.text, { actor: d.actor, p: r.p, roll: r.roll });
   }
+  // 4. Upkeep, events, collapse, end checks.
   upkeep(s);
   checkEnd(s);
   snapshot(s);
-  s.phase = s.outcome ? 'over' : 'results';
+  s.briefing = compileBriefing(s, mine, others, s.news, scoreBefore, worldBefore);
+  s.recent = s.recent.filter((r) => r.turn >= s.turn - 4);
+  if (s.outcome) s.phase = 'over';
+  else beginTurn(s);
 }
 
-export function nextTurn(s) {
-  if (s.phase === 'over') return;
-  s.turn += 1;
-  s.declared = {}; s.debate = []; s.results = []; s.news = [];
-  s.phase = 'declare';
-}
-
-// Run one full turn with the AI also playing the player's seat (autoplay / dev step()).
+// Play the current turn with the AI in the player's seat (autoplay / dev step()).
 export function autoTurn(s) {
-  if (s.phase === 'over') return;
-  if (s.phase === 'results') nextTurn(s);
-  if (s.phase === 'declare' && s.player && !s.declared[s.player] && !s.actors[s.player].collapsed) {
-    const c = chooseAction(s, s.player);
-    if (c) declare(s, s.player, c.action, c.target, c.commit);
+  if (s.phase !== 'turn') return;
+  const p = s.player;
+  if (p && !s.actors[p].collapsed) {
+    for (const sit of s.situations) sit.choice = chooseOptionAI(s, p, sit);
+    const c = chooseAction(s, p);
+    if (c && c.action !== 'hold') { try { setInitiative(s, c.action, c.target, c.commit); } catch { /* leave as hold */ } }
   }
-  if (s.phase === 'declare') openDebate(s);
-  resolveTurn(s);
+  endTurn(s);
 }
 
 // ── upkeep ──
@@ -159,8 +177,7 @@ function upkeep(s) {
   const capR = w.yemenWar >= 30 || w.gazaCeasefire < 50 ? 100 - 0.8 * (s.theaters.babElMandeb.infl.houthis || 0) : 100;
   if (w.redSea > capR) W(s, 'redSea', -Math.min(6, w.redSea - capR));
   s.flags.capHormuz = Math.round(capH); s.flags.capRedSea = Math.round(capR);
-  // Gaza.
-  // Reconstruction only advances under a durable ceasefire with international presence.
+  // Gaza: reconstruction only advances under a durable ceasefire with international presence.
   W(s, 'humanitarian', w.gazaCeasefire < 40 ? -3 : w.gazaCeasefire >= 60 && w.isfDeployed >= 30 ? 1 : -1);
   if (s.actors.pij.military > 12 && !s.actors.pij.collapsed) W(s, 'gazaCeasefire', -1);
   // ISIS thrives on chaos.
@@ -188,18 +205,25 @@ function upkeep(s) {
   for (const a of Object.values(s.actors)) {
     if (!a.collapsed && a.stability <= 0) {
       a.collapsed = true;
+      s.flags[`collapsed:${a.id}`] = s.turn;
       for (const t of Object.values(s.theaters)) if (t.infl[a.id]) infl(s, t.id, a.id, -Math.ceil(t.infl[a.id] / 2));
-      log(s, 'collapse', `${ACTOR_BY_ID[a.id].name} has collapsed.`);
-      s.news.push({ id: 'collapse', text: `${ACTOR_BY_ID[a.id].name} has collapsed.`, at: ACTOR_BY_ID[a.id].home });
+      const text = `${ACTOR_BY_ID[a.id].name} has collapsed.`;
+      log(s, 'collapse', text);
+      s.news.push({ id: 'collapse', text, at: ACTOR_BY_ID[a.id].home, impact: null });
+      s.recent.push({ turn: s.turn, kind: 'event', id: 'collapse', at: ACTOR_BY_ID[a.id].home, text });
     }
   }
 }
 
 export function fireEvent(s, e) {
+  const p = s.player;
   const text = typeof e.text === 'function' ? e.text(s) : e.text;
+  const before = p ? snapshotFor(s, p) : null;
   e.apply(s);
   deriveWorld(s);
-  s.news.push({ id: e.id, text, at: e.at });
+  const impact = p ? impactSince(s, p, before) : null;
+  s.news.push({ id: e.id, text, at: e.at, impact });
+  s.recent.push({ turn: s.turn, kind: 'event', id: e.id, at: e.at, text });
   log(s, 'event', text);
 }
 export const spawnEvent = (s, id) => fireEvent(s, EVENT_BY_ID[id] ?? THRESHOLDS.find((t) => t.id === id) ?? SCRIPTED[id]);
@@ -215,7 +239,7 @@ function checkEnd(s) {
   const me = s.actors[p];
   if (me.collapsed) { s.outcome = { result: 'defeat', reason: `${ACTOR_BY_ID[p].name} has collapsed.` }; return; }
   const rep = goalReport(ACTOR_BY_ID[p], s);
-  if (s.turn >= 3 && rep.every((g) => g.met)) { s.outcome = { result: 'victory', decisive: true, reason: 'Every strategic objective achieved.' }; return; }
+  if (s.turn >= 6 && rep.every((g) => g.met)) { s.outcome = { result: 'victory', decisive: true, reason: 'Every strategic objective achieved.' }; return; }
   if (s.turn >= s.maxTurns) {
     const sc = goalScore(ACTOR_BY_ID[p], s);
     const th = thresholds(s, p);
@@ -233,7 +257,7 @@ export function forceOutcome(s, result) {
 }
 
 function snapshot(s, turn = s.turn) {
-  s.history.push({ turn, date: dateOf(turn + 1), world: { ...s.world }, scores: scores(s) });
+  s.history.push({ turn, date: dateOf(turn + 1), world: { ...s.world }, scores: scores(s), progress: s.player ? ACTOR_BY_ID[s.player].goals.map((g) => +g.progress(s).toFixed(3)) : null });
 }
 
 export { band, dateOf };

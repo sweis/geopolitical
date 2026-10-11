@@ -55,9 +55,28 @@ function grudgeBonus(s, a, c) {
   return 0;
 }
 
+// Flags set by situations bend AI behaviour: a restrained ally, a truce, an open channel.
+function flagBias(s, a, c) {
+  const act = ACTION_BY_ID[c.action];
+  const hostile = act.cat === 'military' || act.cat === 'covert';
+  if (!hostile) return 0;
+  let bias = 0;
+  if (a === 'israel' && s.flags.israel_restrained >= s.turn - 2 && ['tehran', 'nuclearSites'].includes(c.target)) bias -= 4;
+  const t = s.theaters[c.target];
+  for (const [k, v] of Object.entries(s.flags)) {
+    if (typeof v !== 'number' || v < s.turn - 3) continue;
+    const m = /^(truce|talks):([^:]+):([^:]+)$/.exec(k);
+    if (!m) continue;
+    const other = m[2] === a ? m[3] : m[3] === a ? m[2] : null;
+    if (!other) continue;
+    if (c.target === other || (t && (homeOf(other) === c.target || (t.infl[other] || 0) >= 30))) bias -= m[1] === 'truce' ? 3 : 2;
+  }
+  return bias;
+}
+
 export function chooseAction(s, a) {
   const base = utility(s, a);
-  const scored = candidates(s, a).map((c) => ({ ...c, ev: expectedGain(s, a, c, base) + grudgeBonus(s, a, c) }));
+  const scored = candidates(s, a).map((c) => ({ ...c, ev: expectedGain(s, a, c, base) + grudgeBonus(s, a, c) + flagBias(s, a, c) }));
   if (!scored.length) return null;
   scored.sort((x, y) => y.ev - x.ev);
   const top = scored.slice(0, 6);
