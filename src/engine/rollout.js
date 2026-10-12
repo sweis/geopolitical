@@ -5,7 +5,8 @@
 //     or with the AI in the player's seat), summarized as score bands, outcome odds and recurring end states.
 // Rollouts draw their randomness from seeds derived from the state, so the main game stays replayable and
 // the same board with the same orders always yields the same forecast.
-import { ACTION_BY_ID, affordable } from './actions.js';
+import { ACTION_BY_ID, affordable, blocked } from './actions.js';
+import { isOp, startOp, tickOps, standDown, findOp } from './ops.js';
 import { simClone, alive, hitBy } from './state.js';
 import { resolve as resolveDecl, payCost } from './adjudicate.js';
 import { rand } from './rng.js';
@@ -36,7 +37,7 @@ export function rolloutClone(s, tag, seed) {
   c.simTag = tag; c.rng = seed | 0; c.crn = seed | 0;
   c.recent = [...s.recent]; c.history = [...s.history]; c.fatigue = { ...(s.fatigue || {}) }; c.cool = { ...s.cool };
   c.situations = s.situations.map((x) => ({ ...x }));
-  c.declared = {}; c.orders = { initiative: s.orders?.initiative ? { ...s.orders.initiative } : null };
+  c.declared = {}; c.orders = { initiative: s.orders?.initiative ? { ...s.orders.initiative } : null, standDown: [...(s.orders?.standDown ?? [])] };
   c.log = []; c.news = []; c.results = []; c.briefing = null; c.outcome = s.outcome ?? null;
   c.rolled = [];
   return c;
@@ -50,7 +51,7 @@ export function sampleFrom(c, a, policy) {
   let r = rand(c) * policy.reduce((n, x) => n + x.w, 0);
   let pick = policy[policy.length - 1];
   for (const x of policy) { r -= x.w; if (r <= 0) { pick = x; break; } }
-  const ok = (x) => { const act = ACTION_BY_ID[x.action]; return act && act.targets(c, a).includes(x.target) && affordable(c, a, act, x.commit); };
+  const ok = (x) => { const act = ACTION_BY_ID[x.action]; return act && act.targets(c, a).includes(x.target) && affordable(c, a, act, x.commit) && !blocked(c, a, act, x.target); };
   if (ok(pick)) return pick;
   for (const x of policy) if (ok(x)) return x;
   return HOLD;
@@ -76,6 +77,7 @@ export function rolloutTurn(c, plan, { player = 'ai', cards = true, force = null
   };
   reseed(c, 1);
   if (p && !c.actors[p].collapsed) {
+    if (player === 'orders') for (const id of c.orders.standDown ?? []) { const op = findOp(c, id); if (op && op.actor === p && (op.status === 'preparing' || op.status === 'active')) standDown(c, op, null); }
     if (player === 'ai') {
       if (cards) { if (!c.situations.length) generateSituations(c); for (const sit of c.situations) sit.choice = chooseOptionAI(c, p, sit); }
       else c.situations = [];
@@ -100,13 +102,16 @@ export function rolloutTurn(c, plan, { player = 'ai', cards = true, force = null
   for (const d of decls) {
     if (c.actors[d.actor].collapsed) continue;
     const act = ACTION_BY_ID[d.action];
-    if (!act || !act.targets(c, d.actor).includes(d.target) || !affordable(c, d.actor, act, d.commit)) continue;
+    if (!act || !act.targets(c, d.actor).includes(d.target) || !affordable(c, d.actor, act, d.commit) || blocked(c, d.actor, act, d.target)) continue;
     payCost(c, d.actor, d.action, d.commit);
+    if (isOp(act)) { startOp(c, d.actor, d.action, d.target, d.commit); continue; }
     reseed(c, 200 + ACTOR_INDEX[d.actor]);
     const r = resolveDecl(c, d);
     c.recent.push({ turn: c.turn, kind: 'action', actor: d.actor, action: d.action, target: d.target, ok: r.ok, outcome: r.outcome, text: r.text });
     if (FORCE.has(d.action)) used.add(d.actor);
   }
+  reseed(c, 4);
+  for (const x of tickOps(c)) used.add(x);
   for (const id of Object.keys(c.actors)) c.fatigue[id] = used.has(id) ? (c.fatigue[id] || 0) + 1 : Math.max(0, (c.fatigue[id] || 0) - 1);
   reseed(c, 3);
   upkeep(c);
@@ -115,7 +120,7 @@ export function rolloutTurn(c, plan, { player = 'ai', cards = true, force = null
   c.history.push({ turn: c.turn, scores: p ? { [p]: sc } : {}, world: { ...c.world }, progress: p ? ACTOR_BY_ID[p].goals.map((g) => +g.progress(c).toFixed(3)) : null });
   c.rolled.push({ turn: c.turn, score: sc });
   c.recent = c.recent.filter((r) => r.turn >= c.turn - 4);
-  if (!c.outcome) { c.turn += 1; c.declared = {}; c.orders = { initiative: null }; c.situations = []; }
+  if (!c.outcome) { c.turn += 1; c.declared = {}; c.orders = { initiative: null, standDown: [] }; c.situations = []; }
 }
 
 // Policy improvement by rollout. For each actor and each candidate, play `rollouts` short games in which

@@ -7,8 +7,9 @@
 // default:true marks the fallback picked when the player leaves the card unanswered. }
 import { ACTOR_BY_ID } from '../actors.js';
 import { THEATER_BY_ID } from '../theaters.js';
-import { ACTION_BY_ID, costOf } from '../../engine/actions.js';
-import { evaluate, narrate } from '../../engine/adjudicate.js';
+import { ACTION_BY_ID, costOf, blocked } from '../../engine/actions.js';
+import { evaluate, narrate, clampP, band } from '../../engine/adjudicate.js';
+import { isOp, startOp, simulateOp, weeks, opName } from '../../engine/ops.js';
 import { W, res, relAdd, infl, tension, rel, homeOf, hitBy, recentOf, deriveWorld } from '../../engine/state.js';
 
 export const C = (money = 0, military = 0, political = 0) => ({ money, military, political });
@@ -64,6 +65,8 @@ export function makeHelpers(s, p) {
 }
 
 // Build an option from a catalogue action taken by the player, optionally with a bonus and overrides.
+// An option built from an operation starts it (no roll now; the odds shown are for its completion),
+// and previews what it would do if it went to plan.
 export function fromAction(h, actionId, target, o = {}) {
   const act = ACTION_BY_ID[actionId];
   let mods = [];
@@ -72,16 +75,28 @@ export function fromAction(h, actionId, target, o = {}) {
   const base = costOf(act, 0);
   const reasons = [...mods];
   if (o.bonus) reasons.push({ text: o.why ?? 'Circumstances favour it', d: o.bonus });
-  return {
+  const common = {
     id: o.id ?? `${actionId}${target ? ':' + target : ''}`,
     label: o.label ?? act.name,
-    text: o.text ?? act.desc,
     cost: { money: Math.ceil(base.money * mult), military: Math.ceil(base.military * mult), political: Math.ceil(base.political * mult) },
-    odds: act.base, reasons,
+    sets: o.sets, default: o.default, action: actionId, target,
+  };
+  if (!isOp(act)) return {
+    ...common, text: o.text ?? act.desc, odds: act.base, reasons, blocked: blocked(h.s, h.p, act, target),
     success: (h2, m) => { act.success(h2.s, h2.p, target, m); o.success?.(h2, m); },
     fail: (h2, m) => { act.fail(h2.s, h2.p, target, m); o.fail?.(h2, m); },
     say: { success: o.say?.success ?? narrate(actionId, h.p, target, true), fail: o.say?.fail ?? narrate(actionId, h.p, target, false) },
-    sets: o.sets, default: o.default, action: actionId, target,
+  };
+  const dur = act.duration ?? 1;
+  const pOp = clampP(act.base + reasons.reduce((n, r) => n + r.d, 0));
+  const phase = act.op === 'deploy' ? 'arrives' : act.op === 'project' ? 'completes' : 'under way';
+  return {
+    ...common, text: `${o.text ?? act.desc} ${act.op === 'sustained' && dur <= 1 ? 'Runs fortnight after fortnight until stood down.' : `Takes ${weeks(dur)}.`}`,
+    odds: null, reasons: [], op: true, eta: dur, lock: act.lock ?? 0, upkeep: act.upkeep?.money ?? 0, blocked: blocked(h.s, h.p, act, target), opOdds: { p: pOp, band: band(pOp), reasons },
+    success: (h2, m) => { startOp(h2.s, h2.p, actionId, target, 0, { bonus: o.bonus ?? 0, source: 'card' }); o.success?.(h2, m); },
+    fail: () => {},
+    preview: (h2, m) => { simulateOp(h2.s, h2.p, actionId, target, 0, 'success'); o.success?.(h2, m); },
+    say: { success: `${h.name(h.p)} launched ${opName(act)}${target ? ` (${h.name(target)})` : ''}: ${phase}${act.op === 'sustained' && dur <= 1 ? '' : ` in ${weeks(dur)}`}.`, fail: '' },
   };
 }
 

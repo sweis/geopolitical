@@ -33,12 +33,12 @@ export function payCost(s, a, actionId, commit) {
 }
 
 // Apply an outcome without rolling (used by AI lookahead and by resolve()).
-export function applyOutcome(s, a, actionId, target, outcome) {
+export function applyOutcome(s, a, actionId, target, outcome, mult = 1) {
   const act = ACTION_BY_ID[actionId];
-  if (outcome === 'crit') act.success(s, a, target, 1.5);
-  else if (outcome === 'success') act.success(s, a, target, 1);
-  else if (outcome === 'blowback') act.fail(s, a, target, 1.5);
-  else act.fail(s, a, target, 1);
+  if (outcome === 'crit') act.success(s, a, target, 1.5 * mult);
+  else if (outcome === 'success') act.success(s, a, target, mult);
+  else if (outcome === 'blowback') act.fail(s, a, target, 1.5 * mult);
+  else act.fail(s, a, target, mult);
   applyConsequences(s, a, actionId, target, outcome);
   deriveWorld(s);
 }

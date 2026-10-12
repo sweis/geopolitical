@@ -3,7 +3,13 @@
 // and deterministic effects for success (m = 1, or 1.5 on an exceptional roll) and failure.
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { THEATER_BY_ID } from '../data/theaters.js';
-import { W, res, tension, infl, rel, relAdd, hostiles, homeOf } from './state.js';
+import { W, res, tension, infl, rel, relAdd, hostiles, homeOf, lockedOf } from './state.js';
+
+// Operations (see ops.js): `op` is 'project' | 'sustained' | 'deploy'; `duration` turns to complete or
+// begin; `lock` forces committed for the duration; `upkeep` paid every turn; `maxTurns` for sustained
+// operations; `perTurn` scales a sustained operation's effect; `posture` names what a deployment grants;
+// `requires(s, a, target)` returns why an action cannot start; `fragile` is 'delay' or 'cancel' on attack.
+const posture = (s, a, name) => s.ops.some((o) => o.actor === a && o.status === 'active' && ACTION_BY_ID[o.action]?.posture === name);
 
 const NAME = (id) => ACTOR_BY_ID[id]?.name ?? THEATER_BY_ID[id]?.name ?? id;
 const T = (s, t) => s.theaters[t];
@@ -40,6 +46,7 @@ export const ACTIONS = [
         ...mod(ctrl !== a && A(s, ctrl)?.military >= 60, `${NAME(ctrl)} defends with strong forces`, -0.1),
         ...mod(T(s, t).tension >= 70, 'Forces already in contact; targets well mapped', 0.05),
         ...mod(a === 'us' && s.world.usWarSupport < 35, 'War-weary public limits rules of engagement', -0.05),
+        ...mod(a === 'us' && posture(s, 'us', 'surge'), 'Second carrier and bomber task force on station', 0.1),
         ...mod(a === 'iran' && A(s, 'iran').military < 30, 'Launchers depleted by months of strikes', -0.1),
         ...mod(t === 'nuclearSites' && s.world.iranNuclear <= 40, 'Remaining material is dispersed and buried deep', -0.15),
       ];
@@ -72,8 +79,9 @@ export const ACTIONS = [
   {
     id: 'massiveBombing', name: 'Massive bombing campaign', cat: 'military', target: 'theater',
     who: ['us'], cost: { money: 15, military: 14, political: 3 }, base: 0.65,
-    desc: 'Resume major combat operations against Iran: B-2s, carrier wings and Tomahawks. Degrades what it hits; shipping and the program recover over time.',
+    desc: 'Major combat operations against Iran: B-2s, two carrier wings and Tomahawks. Needs the reinforcements on station. Degrades what it hits; shipping and the program recover over time.',
     targets: () => ['tehran', 'nuclearSites', 'hormuz'],
+    requires: (s) => (posture(s, 'us', 'surge') ? null : 'Reinforce CENTCOM first (6 weeks)'),
     mods: (s) => [
       ...mod(s.world.usWarSupport < 35, 'Congress and the public are souring on the war', -0.1),
       ...mod(A(s, 'iran').military < 35, 'Iranian air defenses already shattered', 0.1),
@@ -91,10 +99,10 @@ export const ACTIONS = [
     say: { success: 'The United States launched a massive bombing campaign against {t}.', fail: 'The US campaign against {t} stalled; aircraft were lost and Iran claimed victory.' },
   },
   {
-    id: 'offensive', name: 'Ground offensive', cat: 'military', target: 'theater',
+    id: 'offensive', name: 'Ground offensive', gerund: 'a ground campaign', cat: 'military', target: 'theater',
     who: ['israel', 'turkey', 'syria', 'sdf', 'krg', 'iraqMilitias', 'hezbollah', 'hamas', 'isis', 'saudi', 'houthis', 'egypt'],
-    cost: { money: 8, military: 12, political: 1 }, base: 0.5,
-    desc: 'Seize ground. Shifts influence in the theater and degrades hostile forces, at heavy cost.',
+    cost: { money: 6, military: 4, political: 1 }, base: 0.5, op: 'sustained', duration: 1, maxTurns: 3, lock: 12, upkeep: { money: 3 }, perTurn: 0.7,
+    desc: 'A ground campaign over six weeks. Commits a division-sized force; each fortnight it fights, shifting influence and degrading hostile forces, at heavy cost.',
     targets: (s, a) => reach(s, a).filter((t) => hostiles(s, a, t).length),
     mods: (s, a, t) => {
       const hs = hostiles(s, a, t);
@@ -125,9 +133,9 @@ export const ACTIONS = [
     say: { success: '{a} forces advanced in {t}.', fail: '{a}\'s offensive in {t} was repulsed with heavy losses.' },
   },
   {
-    id: 'harass', name: 'Attack shipping', cat: 'military', target: 'theater',
-    who: ['iran', 'houthis'], cost: { money: 2, military: 4, political: 0 }, base: 0.7,
-    desc: 'Mines, drones and boarding parties against commercial shipping. Leverage through pain at the pump.',
+    id: 'harass', name: 'Attack shipping', gerund: 'an interdiction campaign', cat: 'military', target: 'theater',
+    who: ['iran', 'houthis'], cost: { money: 2, military: 2, political: 0 }, base: 0.7, op: 'sustained', duration: 1, maxTurns: 6, lock: 6, upkeep: { money: 1 }, perTurn: 0.8,
+    desc: 'An interdiction campaign: mines, drones and boarding parties against commercial shipping, fortnight after fortnight, until stood down. Leverage through pain at the pump.',
     targets: (s, a) => (a === 'iran' ? ['hormuz'] : ['babElMandeb', 'redSea']),
     mods: (s, a, t) => [
       ...mod((T(s, t).infl.us || 0) >= 50, 'US naval escorts on station', -0.15),
@@ -142,14 +150,15 @@ export const ACTIONS = [
     say: { success: '{a} attacks on shipping in {t} sent insurers fleeing.', fail: '{a}\'s attack boats in {t} were destroyed before reaching targets.' },
   },
   {
-    id: 'escort', name: 'Naval escort operation', cat: 'military', target: 'theater',
-    who: ['us', 'eu', 'china', 'saudi', 'egypt', 'turkey', 'russia'], cost: { money: 6, military: 5, political: 1 }, base: 0.55,
-    desc: 'Convoy and mine-clearing operations to restore commercial traffic through a chokepoint.',
+    id: 'escort', name: 'Naval escort operation', gerund: 'a convoy operation', cat: 'military', target: 'theater',
+    who: ['us', 'eu', 'china', 'saudi', 'egypt', 'turkey', 'russia'], cost: { money: 4, military: 2, political: 1 }, base: 0.55, op: 'sustained', duration: 1, maxTurns: 8, lock: 8, upkeep: { money: 2 }, perTurn: 0.8,
+    desc: 'A standing convoy and mine-clearing operation to restore commercial traffic through a chokepoint. Ties up a flotilla for as long as it runs.',
     targets: () => ['hormuz', 'babElMandeb', 'redSea'],
     mods: (s, a, t) => {
       const foe = t === 'hormuz' ? 'iran' : 'houthis';
       return [
         ...mod(a === 'us', 'The world\'s largest navy', 0.15),
+        ...mod(a === 'us' && posture(s, 'us', 'surge'), 'Reinforced fleet on station', 0.1),
         ...mod((T(s, t).infl[foe] || 0) >= 50, `${NAME(foe)} dominates the coastline`, -0.15),
         ...mod(s.world.warIntensity >= 60 && t === 'hormuz', 'Shipowners will not sail into an active war zone', -0.1),
         ...mod(A(s, foe).military < 25, `${NAME(foe)} capabilities degraded`, 0.1),
@@ -161,9 +170,9 @@ export const ACTIONS = [
     say: { success: '{a} escorted convoys safely through {t}.', fail: 'An escort mission by {a} in {t} was hit; traffic did not recover.' },
   },
   {
-    id: 'armProxy', name: 'Arm & fund a partner', cat: 'military', target: 'actor',
-    who: ['us', 'iran', 'russia', 'turkey', 'saudi', 'eu', 'israel', 'china'], cost: { money: 8, military: 0, political: 1 }, base: 0.75,
-    desc: 'Ship weapons, money and advisers to a friendly force.',
+    id: 'armProxy', name: 'Arm & fund a partner', gerund: 'arms deliveries', cat: 'military', target: 'actor',
+    who: ['us', 'iran', 'russia', 'turkey', 'saudi', 'eu', 'israel', 'china'], cost: { money: 8, military: 0, political: 1 }, base: 0.75, op: 'project', duration: 2,
+    desc: 'Ship weapons, money and advisers to a friendly force. Deliveries take a month to arrive.',
     targets: (s, a) => Object.keys(s.actors).filter((b) => b !== a && !s.actors[b].collapsed && rel(s, a, b) >= 40 && !BIG.includes(b)),
     mods: (s, a, b) => [
       ...mod(a === 'iran' && b === 'hezbollah', 'The Syrian land bridge is gone', -0.15),
@@ -181,9 +190,9 @@ export const ACTIONS = [
     say: { success: '{a} delivered weapons and cash to {t}.', fail: 'An arms shipment from {a} to {t} was intercepted.' },
   },
   {
-    id: 'decapitation', name: 'Targeted killing', cat: 'covert', target: 'actor',
-    who: ['us', 'israel', 'iran', 'turkey'], cost: { money: 4, military: 2, political: 2 }, base: 0.4,
-    desc: 'Kill a commander or leader. Destabilises the target; invites retaliation.',
+    id: 'decapitation', name: 'Targeted killing', gerund: 'a targeted-killing operation', cat: 'covert', target: 'actor',
+    who: ['us', 'israel', 'iran', 'turkey'], cost: { money: 4, military: 2, political: 2 }, base: 0.4, op: 'project', duration: 2, fragile: 'delay',
+    desc: 'Kill a commander or leader. A month of surveillance and planning, then the strike. Destabilises the target; invites retaliation.',
     targets: (s, a) => Object.keys(s.actors).filter((b) => b !== a && !s.actors[b].collapsed && rel(s, a, b) <= -50 && !BIG.includes(b)),
     mods: (s, a, b) => [
       ...mod(a === 'israel', 'Deep intelligence penetration', 0.2),
@@ -210,9 +219,9 @@ export const ACTIONS = [
     say: { success: '{a} kept its powder dry.', fail: '{a} kept its powder dry.' },
   },
   {
-    id: 'fortify', name: 'Mobilize & fortify', cat: 'military', target: 'none', who: 'ALL',
-    cost: { money: 5, military: 0, political: 0 }, base: 0.85,
-    desc: 'Call up reserves, disperse assets, harden defenses.',
+    id: 'fortify', name: 'Mobilize & fortify', gerund: 'mobilization', cat: 'military', target: 'none', who: 'ALL',
+    cost: { money: 5, military: 0, political: 0 }, base: 0.85, op: 'project', duration: 2,
+    desc: 'Call up reserves, disperse assets, harden defenses. A month to take effect.',
     targets: () => [null], mods: () => [],
     success: (s, a, t, m) => res(s, a, { military: 8 * m, stability: 2 }),
     fail: () => {},
@@ -269,10 +278,10 @@ export const ACTIONS = [
     say: { success: 'Raids by {a} killed ISIS commanders in {t}.', fail: 'Raids by {a} in {t} came up empty.' },
   },
   {
-    id: 'nuclearDash', name: 'Accelerate the nuclear program', cat: 'military', target: 'none', who: ['iran'],
-    cost: { money: 8, military: 0, political: 2 }, base: 0.5,
-    desc: 'Move hidden HEU, spin up clandestine cascades, edge toward a weapon. Maximum deterrence, maximum risk.',
-    targets: () => [null],
+    id: 'nuclearDash', name: 'Accelerate the nuclear program', gerund: 'the nuclear acceleration', cat: 'military', target: 'none', who: ['iran'],
+    cost: { money: 8, military: 0, political: 2 }, base: 0.5, op: 'project', duration: 3, upkeep: { money: 2 }, fragile: 'cancel',
+    desc: 'Move hidden HEU, spin up clandestine cascades, edge toward a weapon over six weeks. Intelligence services will notice; a heavy strike on the sites wrecks it. Maximum deterrence, maximum risk.',
+    targets: () => [null], at: () => 'nuclearSites',
     mods: (s) => [
       ...mod(s.theaters.nuclearSites.tension >= 70, 'Israeli ISR watching every site', -0.1),
       ...mod(rel(s, 'iran', 'russia') >= 60, 'Quiet Russian technical help', 0.05),
@@ -312,9 +321,9 @@ export const ACTIONS = [
     say: { success: '{a} brokered a de-escalation in {t}.', fail: '{a}\'s ceasefire push for {t} collapsed.' },
   },
   {
-    id: 'disarm', name: 'Push disarmament / integration', cat: 'diplomatic', target: 'theater',
-    who: ['us', 'egypt', 'turkey', 'eu', 'israel', 'lebanon', 'saudi', 'syria'], cost: { money: 4, military: 0, political: 3 }, base: 0.35,
-    desc: 'Advance a disarmament or integration framework: Hamas in Gaza, Hezbollah in Lebanon, the PMF in Iraq, the SDF into Syria.',
+    id: 'disarm', name: 'Push disarmament / integration', gerund: 'disarmament talks', cat: 'diplomatic', target: 'theater',
+    who: ['us', 'egypt', 'turkey', 'eu', 'israel', 'lebanon', 'saudi', 'syria'], cost: { money: 4, military: 0, political: 3 }, base: 0.35, op: 'project', duration: 3,
+    desc: 'Negotiate a disarmament or integration framework over six weeks: Hamas in Gaza, Hezbollah in Lebanon, the PMF in Iraq, the SDF into Syria.',
     targets: () => ['gaza', 'southLebanon', 'baghdad', 'neSyria'],
     mods: (s, a, t) => {
       const w = s.world;
@@ -352,9 +361,9 @@ export const ACTIONS = [
     say: { success: '{a} pushed the disarmament framework forward in {t}.', fail: 'Disarmament talks on {t} stalled amid mutual accusations.' },
   },
   {
-    id: 'deployISF', name: 'Deploy stabilization troops', cat: 'diplomatic', target: 'theater',
-    who: ['us', 'egypt', 'turkey', 'eu', 'saudi', 'china'], cost: { money: 8, military: 3, political: 2 }, base: 0.5,
-    desc: 'Contribute troops or funding to the International Stabilization Force in Gaza (UNSCR 2803).',
+    id: 'deployISF', name: 'Deploy stabilization troops', gerund: 'an ISF deployment', cat: 'diplomatic', target: 'theater',
+    who: ['us', 'egypt', 'turkey', 'eu', 'saudi', 'china'], cost: { money: 6, military: 2, political: 2 }, base: 0.5, op: 'deploy', duration: 2, lock: 6, upkeep: { money: 2 }, posture: 'isf',
+    desc: 'Contribute a contingent to the International Stabilization Force in Gaza (UNSCR 2803). A month to deploy; the troops stay, and cost money, until stood down.',
     targets: () => ['gaza'],
     mods: (s, a) => [
       ...mod(s.world.gazaCeasefire < 40, 'No contributor will deploy into active fighting', -0.15),
@@ -364,12 +373,13 @@ export const ACTIONS = [
     ],
     success: (s, a, t, m) => { W(s, 'isfDeployed', 14 * m); W(s, 'gazaCeasefire', 5); W(s, 'humanitarian', 4); infl(s, 'gaza', a, 8); res(s, a, { political: 1 }); },
     fail: (s, a) => { res(s, a, { political: -1, military: -2 }); },
+    onEnd: (s, a) => { W(s, 'isfDeployed', -10); infl(s, 'gaza', a, -6); },
     say: { success: '{a} deployed a contingent to the Gaza stabilization force.', fail: '{a}\'s ISF contingent never left the staging area.' },
   },
   {
-    id: 'normalize', name: 'Normalization talks', cat: 'diplomatic', target: 'none', who: ['us', 'israel', 'saudi'],
-    cost: { money: 0, military: 0, political: 3 }, base: 0.35,
-    desc: 'Push the Saudi–Israel normalization track.',
+    id: 'normalize', name: 'Normalization talks', gerund: 'normalization talks', cat: 'diplomatic', target: 'none', who: ['us', 'israel', 'saudi'],
+    cost: { money: 0, military: 0, political: 3 }, base: 0.35, op: 'project', duration: 3,
+    desc: 'Push the Saudi–Israel normalization track: six weeks of shuttle diplomacy before anything can be signed.',
     targets: () => [null],
     mods: (s, a) => [
       ...mod(s.world.humanitarian < 35, 'Images from Gaza make normalization toxic', -0.15),
@@ -397,9 +407,9 @@ export const ACTIONS = [
     say: { success: '{a} imposed new sanctions on {t}.', fail: '{a}\'s sanctions package on {t} was watered down to nothing.' },
   },
   {
-    id: 'talks', name: 'Open US–Iran negotiations', cat: 'diplomatic', target: 'none',
-    who: ['us', 'iran', 'eu', 'china', 'russia', 'turkey', 'saudi', 'egypt'], cost: { money: 0, military: 0, political: 3 }, base: 0.35,
-    desc: 'Revive the Islamabad memorandum track: inspections and Hormuz passage in exchange for sanctions relief.',
+    id: 'talks', name: 'Open US–Iran negotiations', gerund: 'US–Iran talks', cat: 'diplomatic', target: 'none',
+    who: ['us', 'iran', 'eu', 'china', 'russia', 'turkey', 'saudi', 'egypt'], cost: { money: 0, military: 0, political: 3 }, base: 0.35, op: 'project', duration: 2,
+    desc: 'Revive the Islamabad memorandum track: inspections and Hormuz passage in exchange for sanctions relief. Two rounds, a month, before terms can be agreed.',
     targets: () => [null],
     mods: (s, a) => [
       ...mod(s.world.warIntensity >= 70, 'Bombs are still falling', -0.1),
@@ -416,9 +426,9 @@ export const ACTIONS = [
     say: { success: '{a} brokered a round of US–Iran talks with real concessions.', fail: 'US–Iran talks pushed by {a} collapsed in recriminations.' },
   },
   {
-    id: 'annex', name: 'Extend sovereignty in the West Bank', cat: 'diplomatic', target: 'theater', who: ['israel'],
-    cost: { money: 2, military: 0, political: 2 }, base: 0.6,
-    desc: 'Settlement expansion and sovereignty legislation. Popular with the coalition; poison for normalization.',
+    id: 'annex', name: 'Extend sovereignty in the West Bank', gerund: 'sovereignty legislation', cat: 'diplomatic', target: 'theater', who: ['israel'],
+    cost: { money: 2, military: 0, political: 2 }, base: 0.6, op: 'project', duration: 2,
+    desc: 'Settlement expansion and sovereignty legislation through the Knesset over a month. Popular with the coalition; poison for normalization.',
     targets: () => ['westbank'],
     mods: (s) => [
       ...mod(rel(s, 'us', 'israel') >= 80, 'Washington will not object', 0.1),
@@ -492,9 +502,9 @@ export const ACTIONS = [
     say: { success: '{a} cut output; prices jumped.', fail: '{a}\'s output cut was swamped by cheating.' },
   },
   {
-    id: 'invest', name: 'Investment & reconstruction', cat: 'economic', target: 'theater',
-    who: ['china', 'saudi', 'turkey', 'eu', 'us', 'russia'], cost: { money: 10, military: 0, political: 0 }, base: 0.7,
-    desc: 'Ports, power plants and reconstruction contracts that buy lasting influence.',
+    id: 'invest', name: 'Investment & reconstruction', gerund: 'investment projects', cat: 'economic', target: 'theater',
+    who: ['china', 'saudi', 'turkey', 'eu', 'us', 'russia'], cost: { money: 4, military: 0, political: 0 }, base: 0.7, op: 'project', duration: 3, upkeep: { money: 3 },
+    desc: 'Ports, power plants and reconstruction contracts that buy lasting influence. Six weeks of spending before the deals are signed.',
     targets: () => ['damascus', 'beirut', 'baghdad', 'kurdistan', 'riyadh', 'sinai', 'tartus', 'gulfBases'],
     mods: (s, a, t) => [
       ...mod(T(s, t).tension >= 60, 'Too unstable for investors', -0.15),
@@ -576,9 +586,9 @@ export const ACTIONS = [
     say: { success: '{a} crushed dissent at home.', fail: '{a}\'s crackdown sparked wider unrest.' },
   },
   {
-    id: 'recruit', name: 'Recruit & rearm', cat: 'domestic', target: 'none', who: 'NONSTATE',
-    cost: { money: 3, military: 0, political: 1 }, base: 0.7,
-    desc: 'Fill the ranks, rebuild workshops, dig tunnels.',
+    id: 'recruit', name: 'Recruit & rearm', gerund: 'recruitment and rearmament', cat: 'domestic', target: 'none', who: 'NONSTATE',
+    cost: { money: 3, military: 0, political: 1 }, base: 0.7, op: 'project', duration: 3, upkeep: { money: 1 },
+    desc: 'Fill the ranks, rebuild workshops, dig tunnels. Six weeks before the new strength is real.',
     targets: () => [null],
     mods: (s, a) => [
       ...mod((a === 'hamas' || a === 'pij') && s.world.humanitarian < 30, 'Grievance fuels recruitment', 0.1),
@@ -624,6 +634,29 @@ export const ACTIONS = [
     fail: () => {},
     say: { success: '{a} pulled forces back from {t}.', fail: '{a}\'s drawdown from {t} was reversed under pressure.' },
   },
+
+  // ───────────────────────── OPERATIONS THAT TAKE WEEKS ─────────────────────────
+  {
+    id: 'surge', name: 'Reinforce CENTCOM', gerund: 'the reinforcement of CENTCOM', cat: 'military', target: 'none', who: ['us'],
+    cost: { money: 8, military: 0, political: 1 }, base: 0.9, op: 'deploy', duration: 3, lock: 20, upkeep: { money: 3 }, posture: 'surge',
+    desc: 'Order a second carrier strike group and a bomber task force to the region. Six weeks in transit; on station they enable a full bombing campaign, improve strikes and escorts, and cost money every fortnight until stood down.',
+    targets: () => [null], at: () => 'gulfBases',
+    mods: (s) => [...mod(s.world.usWarSupport < 30, 'Congress questions another deployment', -0.1)],
+    success: (s) => { infl(s, 'gulfBases', 'us', 10); infl(s, 'hormuz', 'us', 8); tension(s, 'hormuz', 4); W(s, 'usWarSupport', -2); W(s, 'warIntensity', 3); W(s, 'oilAdj', 1); relAdd(s, 'us', 'iran', -5); res(s, 'iran', { stability: -2 }); },
+    fail: (s) => { res(s, 'us', { military: -3 }); },
+    onEnd: (s) => { infl(s, 'gulfBases', 'us', -8); infl(s, 'hormuz', 'us', -6); W(s, 'usWarSupport', 2); },
+    say: { success: 'A second American carrier group and bomber task force arrived on station in the Gulf.', fail: 'The American reinforcements arrived late and under strength.' },
+  },
+  {
+    id: 'buildUp', name: 'Military build-up', gerund: 'a military build-up', cat: 'military', target: 'none', who: 'STATE',
+    cost: { money: 6, military: 0, political: 1 }, base: 0.85, op: 'project', duration: 4, upkeep: { money: 4 },
+    desc: 'Procurement, conscription and training over eight weeks. Raises strength beyond its starting level, at a steady cost.',
+    targets: () => [null],
+    mods: (s, a) => [...mod(A(s, a).stability < 35, 'Unrest disrupts conscription and industry', -0.15), ...mod(BIG.includes(a), 'Deep arsenals and industrial base', 0.05)],
+    success: (s, a, t, m) => { const r = A(s, a); r.capBonus = (r.capBonus || 0) + 12; res(s, a, { military: 14 * m }); },
+    fail: (s, a) => { res(s, a, { military: 5 }); },
+    say: { success: '{a} completed a military build-up.', fail: '{a}\'s build-up delivered less than promised.' },
+  },
 ];
 
 export const ACTION_BY_ID = Object.fromEntries(ACTIONS.map((x) => [x.id, x]));
@@ -631,7 +664,15 @@ export const ACTION_BY_ID = Object.fromEntries(ACTIONS.map((x) => [x.id, x]));
 export function canUse(action, a) {
   if (action.who === 'ALL') return true;
   if (action.who === 'NONSTATE') return isNonstate(a);
+  if (action.who === 'STATE') return isState(a);
   return action.who.includes(a);
+}
+
+// Why an action cannot start now (a missing prerequisite, or the same operation already under way), or null.
+export function blocked(s, a, action, target = null) {
+  if (action.requires) { const why = action.requires(s, a, target); if (why) return why; }
+  if (action.op && s.ops.some((o) => o.actor === a && o.action === action.id && (o.target ?? null) === (target ?? null) && (o.status === 'preparing' || o.status === 'active'))) return 'Already under way';
+  return null;
 }
 
 export const COMMIT = [
@@ -645,9 +686,11 @@ export function costOf(action, commit = 0) {
   return { money: Math.ceil(action.cost.money * m), military: Math.ceil(action.cost.military * m), political: Math.ceil(action.cost.political * m) };
 }
 
+// Affordable now: the cost plus any forces the operation commits must fit in what is not already committed.
 export function affordable(s, a, action, commit = 0) {
   const c = costOf(action, commit), r = s.actors[a];
-  return r.money >= c.money && r.military >= c.military && r.political >= c.political;
+  const upkeep = action.op ? (action.upkeep?.money || 0) * Math.min(3, action.duration || 1) : 0;
+  return r.money >= c.money + upkeep && r.military - lockedOf(s, a) >= c.military + (action.lock || 0) && r.political >= c.political;
 }
 
 export const targetName = NAME;

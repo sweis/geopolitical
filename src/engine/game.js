@@ -7,10 +7,11 @@
 //   the next turn.
 import { ACTORS, ACTOR_BY_ID } from '../data/actors.js';
 import { EVENTS, EVENT_BY_ID, SCRIPTED, THRESHOLDS } from '../data/events.js';
-import { ACTION_BY_ID, affordable, canUse, ACTIONS } from './actions.js';
-import { createState, clamp, deriveWorld, W, res, alive, dateOf, infl, homeOf, rel } from './state.js';
-import { resolve as resolveDecl, evaluate, band, payCost } from './adjudicate.js';
-import { chooseAction, aiArguments, planArgs, sampleMove, packPolicy, rootPlan, AI_CONFIG } from './ai.js';
+import { ACTION_BY_ID, affordable, canUse, ACTIONS, blocked, targetName } from './actions.js';
+import { isOp, startOp, tickOps, standDown, findOp, liveOps, weeks, opName } from './ops.js';
+import { createState, clamp, deriveWorld, W, res, alive, dateOf, infl, homeOf, rel, simClone } from './state.js';
+import { resolve as resolveDecl, evaluate, band, payCost, applyOutcome } from './adjudicate.js';
+import { chooseAction, aiArguments, planArgs, sampleMove, packPolicy, rootPlan, utility, AI_CONFIG } from './ai.js';
 import { improvePolicies } from './rollout.js';
 import { FORCE } from './consequences.js';
 import { goalScore, goalReport } from './goals.js';
@@ -41,7 +42,8 @@ export function newGame(opts = {}) {
 export function beginTurn(s, first = false) {
   if (!first) s.turn += 1;
   // results/news keep last turn's record for the map and briefing; endTurn clears them before resolving.
-  s.declared = {}; s.argUsed = {}; s.orders = { initiative: null };
+  s.declared = {}; s.argUsed = {}; s.orders = { initiative: null, standDown: [] };
+  reviewOps(s);
   // Every actor's mixed strategy: top candidates by one-ply gain, re-weighted by short rollouts when
   // enabled (each actor tests its candidates against everyone else's strategies). The rollout model
   // (what each move does) stays on the state for forecasts.
@@ -73,16 +75,47 @@ export function setInitiative(s, action, target = null, commit = 0) {
   if (!act || !canUse(act, p)) throw new Error(`${p} cannot use ${action}`);
   if (!affordable(s, p, act, commit)) throw new Error(`${p} cannot afford ${action}`);
   if (!act.targets(s, p).includes(target)) throw new Error(`bad target ${target} for ${action}`);
+  const why = blocked(s, p, act, target);
+  if (why) throw new Error(why);
   s.orders.initiative = { action, target, commit };
 }
 export function clearInitiative(s) { s.orders.initiative = null; }
+
+// Mark one of the player's operations to be stood down at the end of the turn (or unmark it).
+export function setStandDown(s, opId, on = true) {
+  const op = findOp(s, opId);
+  if (!op || op.actor !== s.player) throw new Error(`no operation ${opId}`);
+  const list = (s.orders.standDown ??= []).filter((x) => x !== opId);
+  if (on) list.push(opId);
+  s.orders.standDown = list;
+}
+
+// AI actors review their standing operations: a campaign that no longer pays is stood down, and so is a
+// deployment they can no longer fund.
+function reviewOps(s) {
+  for (const op of liveOps(s)) {
+    const a = op.actor;
+    if (a === s.player || op.status !== 'active') continue;
+    const act = ACTION_BY_ID[op.action];
+    if (op.kind === 'sustained') {
+      if (s.actors[a].money < op.upkeep) { standDown(s, op, null); continue; }
+      const base = utility(s, a);
+      let p; try { p = evaluate(s, a, op.action, op.target, op.commit, op.bonus ? [{ d: op.bonus }] : []).p; } catch { continue; }
+      const win = simClone(s), lose = simClone(s);
+      try { applyOutcome(win, a, op.action, op.target, 'success', act.perTurn ?? 1); applyOutcome(lose, a, op.action, op.target, 'fail', act.perTurn ?? 1); } catch { continue; }
+      const v = p * utility(win, a) + (1 - p) * utility(lose, a) - base - 0.04 * op.upkeep;
+      if (v < -0.3) standDown(s, op, null);
+    } else if (op.kind === 'deploy' && s.actors[a].money < op.upkeep * 2) standDown(s, op, null);
+  }
+}
 
 // The full catalogue, for the "all orders" list.
 export function playerMenu(s) {
   const a = s.player;
   return ACTIONS.filter((act) => canUse(act, a) && act.id !== 'hold').map((act) => ({
     id: act.id, name: act.name, cat: act.cat, desc: act.desc, target: act.target, cost: act.cost,
-    targets: act.targets(s, a), affordable: affordable(s, a, act, 0),
+    targets: act.targets(s, a), affordable: affordable(s, a, act, 0), blocked: blocked(s, a, act, act.target === 'none' ? null : undefined),
+    op: act.op ?? null, duration: act.duration ?? 1, lock: act.lock ?? 0, upkeep: act.upkeep?.money ?? 0,
   }));
 }
 
@@ -107,8 +140,13 @@ export function endTurn(s) {
   const scoreBefore = p ? goalScore(pdef, s) : 0;
   const worldBefore = { ...s.world };
   s.results = []; s.news = [];
+  const mine = [], others = [];
+  const report = (r, before) => { if (!('impact' in r)) r.impact = p && before ? impactSince(s, p, before) : null; (r.actor === p ? mine : others).push(r); s.results.push(r); };
+  report.snap = () => (p ? snapshotFor(s, p) : null);
+  // 0. Stand-down orders: forces come home at the end of the turn.
+  for (const id of s.orders.standDown ?? []) { const op = findOp(s, id); if (op && op.actor === p && (op.status === 'preparing' || op.status === 'active')) standDown(s, op, report); }
   // 1. The player's responses to the situation cards.
-  const mine = p ? resolveSituations(s) : [];
+  if (p) mine.push(...resolveSituations(s));
   // 2. The player's initiative joins the declarations.
   if (p && !s.actors[p].collapsed) {
     const init = s.orders.initiative ?? { action: 'hold', target: null, commit: 0 };
@@ -120,8 +158,7 @@ export function endTurn(s) {
       mine.push({ kind: 'action', actor: p, action: init.action, target: init.target, outcome: 'fizzle', ok: false, p: 0, roll: 0, text: `${act.name} could no longer be carried out: resources were spent on the crises of the fortnight.`, impact: null });
     }
   }
-  // 3. Resolve every declaration in random initiative order.
-  const others = [];
+  // 3. Resolve every declaration in random initiative order; operations start rather than resolve.
   for (const d of shuffle(s, Object.values(s.declared))) {
     if (s.actors[d.actor].collapsed) continue;
     const act = ACTION_BY_ID[d.action];
@@ -131,6 +168,14 @@ export function endTurn(s) {
       continue;
     }
     payCost(s, d.actor, d.action, d.commit);
+    if (isOp(act)) {
+      const op = startOp(s, d.actor, d.action, d.target, d.commit, { args: d.args, stakes: d.stakes ?? null });
+      const text = `${ACTOR_BY_ID[d.actor].name} launched ${opName(act)}${d.target ? ` (${targetName(d.target)})` : ''}: ${op.kind === 'sustained' && op.duration <= 1 ? 'under way' : `${op.kind === 'deploy' ? 'arrives' : op.kind === 'project' ? 'completes' : 'begins'} in ${weeks(op.duration)}`}.`;
+      report({ kind: 'op', phase: 'started', actor: d.actor, action: d.action, target: d.target, op: op.id, at: op.at, ok: true, outcome: 'auto', text, impact: null });
+      s.recent.push({ turn: s.turn, kind: 'op', actor: d.actor, action: d.action, target: d.target, phase: 'started', text });
+      log(s, 'op', text, { actor: d.actor });
+      continue;
+    }
     const before = p ? snapshotFor(s, p) : null;
     const r = resolveDecl(s, d);
     r.impact = p ? impactSince(s, p, before) : null;
@@ -139,11 +184,14 @@ export function endTurn(s) {
     s.recent.push({ turn: s.turn, kind: 'action', actor: d.actor, action: d.action, target: d.target, ok: r.ok, outcome: r.outcome, text: r.text });
     log(s, r.ok ? 'success' : 'fail', r.text, { actor: d.actor, p: r.p, roll: r.roll });
   }
+  // 4. Operations advance: arrivals, completions, each fortnight of a campaign.
+  const forced = tickOps(s, report);
   // Fatigue: consecutive turns in which an actor used force.
-  const used = new Set(s.results.filter((r) => FORCE.has(r.action) && r.outcome !== 'fizzle').map((r) => r.actor));
-  for (const r of mine) if (r.kind === 'situation' && r.action && FORCE.has(r.action)) used.add(p);
+  const used = new Set(s.results.filter((r) => r.kind !== 'op' && FORCE.has(r.action) && r.outcome !== 'fizzle').map((r) => r.actor));
+  for (const x of forced) used.add(x);
+  for (const r of mine) if (r.kind === 'situation' && r.action && !r.op && FORCE.has(r.action)) used.add(p);
   for (const id of Object.keys(s.actors)) s.fatigue[id] = used.has(id) ? (s.fatigue[id] || 0) + 1 : Math.max(0, (s.fatigue[id] || 0) - 1);
-  // 4. Upkeep, events, collapse, end checks.
+  // 5. Upkeep, events, collapse, end checks.
   upkeep(s);
   checkEnd(s);
   snapshot(s);
@@ -173,7 +221,8 @@ export function upkeep(s) {
     if (a.collapsed) continue;
     a.money = Math.round((a.money + def.income.money * (0.5 + a.stability / 200)) * 10) / 10;
     // Forces regenerate slowly toward their starting strength (munitions, crews, repairs); growth beyond it takes deliberate action.
-    if (a.military < def.start.military) a.military = Math.min(def.start.military, a.military + Math.min(def.income.military, 3));
+    const cap = def.start.military + (a.capBonus || 0);
+    if (a.military < cap) a.military = Math.min(cap, a.military + Math.min(def.income.military, 3));
     a.political = Math.min(20, a.political + def.income.political);
     if (def.kind === 'nonstate' && a.stability < 30) a.stability += 1; // insurgent resilience
     if (a.stability > 50) a.stability -= a.stability > 70 ? 2 : 1; // cohesion erodes without upkeep

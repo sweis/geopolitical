@@ -5,12 +5,12 @@
 // Usage: node tests/policies.mjs [seeds=5] [actors=us,israel,iran]
 import { newGame, endTurn, choose, setInitiative, autoTurn, thresholds } from '../src/engine/game.js';
 import { ACTOR_BY_ID } from '../src/data/actors.js';
-import { ACTION_BY_ID, affordable } from '../src/engine/actions.js';
+import { ACTION_BY_ID, affordable, blocked } from '../src/engine/actions.js';
 import { goalScore } from '../src/engine/goals.js';
 
 const seeds = +(process.argv[2] ?? 5);
 const actors = (process.argv[3] ?? 'us,israel,iran').split(',');
-const FORCE = ['massiveBombing', 'strike', 'offensive', 'harass', 'decapitation'];
+const FORCE = ['massiveBombing', 'surge', 'strike', 'offensive', 'harass', 'decapitation'];
 const TALK = ['talks', 'ceasefire', 'escort', 'reliefGaza', 'deployISF', 'disarm', 'normalize', 'bankroll', 'invest', 'unResolution'];
 const FORCE_RE = /strike|retaliat|escalat|bomb|hunt|attack|hit |crush|seize|seal|crack|press|push|operation|salvo|rocket|missile|drone|counter|fire|resume|full campaign|launchers|sweep|storm|arm|reinforce|harden|demand|defy|double|unconditional|bill|reject|refuse/i;
 const TALK_RE = /talk|negotiat|accept|terms|deal|channel|mediat|offer|envoy|withdraw|restrain|comply|pause|de-escalat|hotline|appeal|lobby|freeze|concede|conditions|host|relay|aid|fund|pay|share|quiet|wait|hold|truce|ceasefire|summit|verif|hand over|handover/i;
@@ -26,7 +26,7 @@ function pickInitiative(s, p, list) {
   for (const id of list) {
     const act = ACTION_BY_ID[id];
     if (!act || (act.who !== 'ALL' && act.who !== 'NONSTATE' && !act.who.includes(p)) || !affordable(s, p, act, 0)) continue;
-    const targets = act.targets(s, p);
+    const targets = act.targets(s, p).filter((t) => !blocked(s, p, act, t));
     if (!targets.length) continue;
     const pref = (PREF_TARGETS[p] ?? []).find((t) => targets.includes(t));
     return { action: id, target: pref ?? targets[0] };

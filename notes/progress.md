@@ -1,6 +1,6 @@
 # Progress notes — Red Lines (Middle East 2026)
 
-_Last updated: 2026-10-11 (session 4)._
+_Last updated: 2026-10-12 (session 5)._
 
 ## What exists
 A playable browser prototype. No build step: plain ES modules served statically.
@@ -79,6 +79,19 @@ Cost (Node): one-ply plan for 19 actors 160 ms; rollout improvement (6×2) ~200 
 
 Design decision (user call): for the US, "war support collapses" (<25) in 65–100% of futures whatever the orders. Kept as is: domestic support eroding through a long war is realistic, and the home front is meant to be the US player's binding constraint. "ISIS resurgent" in 55–75% of futures is the same kind of signal (chaos feeds it) and also stays.
 
+### Operations: orders that take weeks (session 5)
+Playtest direction: actions should span turns, tie up forces for their duration, and follow real timelines (a strike with assets in position is a fortnight's work; moving a carrier takes weeks; building up forces takes months).
+
+`src/engine/ops.js`. An action with `op` is an operation:
+- **project** – prepares for `duration` turns, then resolves once with a hidden roll (talks 2 turns, arms deliveries 2, a targeted killing 2, annexation 2, mobilization 2, disarmament and normalization talks 3, investment 3, rearmament 3, the nuclear dash 3, a state build-up 4 with +12 to the force ceiling);
+- **sustained** – runs fortnight after fortnight, a roll and a per-turn effect each time, for up to `maxTurns` or until stood down (convoy escorts, interdiction campaigns, a 3-turn ground campaign);
+- **deploy** – arrives after `duration` turns and stays on station granting a **posture** until stood down (Reinforce CENTCOM: a second carrier group and bomber task force, 3 turns, 20 forces committed, $3 a fortnight; an ISF contingent).
+Operations commit forces (`lock`: not spendable while the operation lives; the actor card shows available/total and a hatched segment) and pay `upkeep` every turn after the launch turn; a project that cannot pay stalls, a campaign or deployment that cannot pay stands down. `requires` gates actions on postures: the massive bombing campaign needs the surge on station ("Reinforce CENTCOM first (6 weeks)"), strikes and escorts get +10% with it. Preparing operations are visible to everyone (Intel tab, dashed rings on the map, the popover and tooltip), the intelligence card can report a rival's operation and let you lobby its completion odds, and fragile operations are set back a fortnight by attacks on their site (two by heavy attacks); the nuclear dash is wrecked outright by a massive bombing of the sites. The player stands operations down from the Command tab (an order, not the initiative). AI actors review their campaigns each turn and stand down the ones that no longer pay.
+
+AI: candidates exclude blocked actions; operations are valued as if they went to plan, discounted 0.92 per turn of duration, less a charge for the forces they tie up; a rival's preparing operation that would hurt an actor makes hitting its site worth more (strike the dash before it lands). Rollouts and forecasts tick operations like the real turn, so the futures account for what is already under way. Card options built from operations launch them (no roll at card time; the pips show completion odds, the clock chip the time) and are blocked by the same prerequisites.
+
+Costs: the one-ply plan is ~10% dearer (prerequisite checks), a 20-game forecast ~1.2 s in Chromium.
+
 ### Dev hooks (`?dev=1`)
 `window.game`: `getState()` (includes `policies` and `forecast`), `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `forecast({ n, player })` (synchronous), `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`, `ai=shallow`, `noforecast`, `runs`.
 Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader counts are null.
@@ -96,6 +109,11 @@ Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader 
 - `node tests/engine.mjs`: strategies sum to 1 and list distinct moves; a forecast leaves the state untouched, has 17 bands and outcomes summing to 1, carries objectives/end states/winners, is deterministic, and changes with the orders; the rollout-improved AI replays identically (turn start 170 ms at 2×2 in Node).
 - `node tests/browser.mjs`: through the real mouse path, holding and orders forecasts complete in the background (20 games, ~680 ms), the status bar and orders bar show the outlook with the comparison, the Futures tab renders the fan chart, end states and five objectives, Intel lists 18 actors' assessed intentions, the briefing's outlook line updates in place ("win 15% (was 20%)"), and the soak still finishes 16 turns in 10 s with the deep AI. Stills sweep and phone viewport unchanged.
 - Captures: `test-output/futures.png`, `futures-t4.png`, `futures-iran.png`, `cmd-outlook.png`, `intel.png`.
+
+## Verified (session 5)
+- `node tests/engine.mjs`: the bombing campaign is blocked (and refused as an order, and blocked on the CENTCOM card) until the surge is on station; the surge takes 3 turns, commits 20 forces, cannot be launched twice, grants the strike bonus, and standing down releases the forces; AI games run several kinds of operations that complete, arrive or end; committed forces stay within strength.
+- `node tests/browser.mjs`: real-mouse path orders the surge from the catalogue (initiative shows "6 weeks", orders bar shows "20 committed"), next turn the operations panel shows it arriving in 4 weeks, the actor card shows 75/95, the map rings theaters with operations, stand-down orders mark and clear; the bombing campaign row is disabled with the reason. Full suite green.
+- Captures: `test-output/ops.png`, `ops-station.png`, `ops-israel.png`.
 
 ## Not verified
 - Human playtest of the new flow.

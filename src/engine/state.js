@@ -22,7 +22,7 @@ export function createState({ seed = 1, player = null, maxTurns = MAX_TURNS } = 
     declared: {}, argUsed: {}, situations: [], orders: { initiative: null }, policies: {}, model: null,
     // What happened: this turn's results and events, the relevance-filtered briefing, and a short
     // structured memory of recent results that situations and AI grudges read.
-    results: [], news: [], briefing: null, recent: [], cool: {}, fatigue: {},
+    results: [], news: [], briefing: null, recent: [], cool: {}, fatigue: {}, ops: [],
     log: [], history: [], flags: {},
     outcome: null,
   };
@@ -44,7 +44,7 @@ export function simClone(s) {
   const actors = {}, theaters = {};
   for (const k in s.actors) actors[k] = { ...s.actors[k] };
   for (const k in s.theaters) theaters[k] = { id: k, tension: s.theaters[k].tension, infl: { ...s.theaters[k].infl } };
-  return { ...s, world: { ...s.world }, actors, theaters, rel: { ...s.rel }, flags: { ...s.flags }, log: [], history: [], news: [], results: [], declared: s.declared };
+  return { ...s, world: { ...s.world }, actors, theaters, rel: { ...s.rel }, flags: { ...s.flags }, ops: s.ops.map((o) => ({ ...o })), log: [], history: [], news: [], results: [], declared: s.declared };
 }
 import { relKey, rel } from './relations.js';
 export { relKey, rel };
@@ -84,6 +84,10 @@ export function infl(s, t, id, d) {
 }
 
 export const alive = (s) => Object.values(s.actors).filter((a) => !a.collapsed).map((a) => a.id);
+
+// Forces committed to live operations, and what is left to spend.
+export function lockedOf(s, a) { let n = 0; for (const o of s.ops) if (o.actor === a && (o.status === 'preparing' || o.status === 'active')) n += o.lock; return n; }
+export function available(s, a) { const r = s.actors[a]; return { money: r.money, military: r.military - lockedOf(s, a), political: r.political }; }
 
 // Actors with presence in theater t who are hostile to actor a.
 export function hostiles(s, a, t, thr = -40) {

@@ -5,10 +5,11 @@ import { ACTOR_BY_ID } from '../data/actors.js';
 import { THEATER_BY_ID } from '../data/theaters.js';
 import { WORLD_LABELS, WORLD_SHORT } from '../data/world.js';
 import { ACTION_BY_ID, affordable, canUse, costOf, targetName } from './actions.js';
+import { isOp, simulateOp, liveOps, findOp, weeks } from './ops.js';
 import { band, clampP, rollFor, evaluate, applyOutcome, payCost } from './adjudicate.js';
 import { goalScore, goalKeys } from './goals.js';
-import { utility, candidates, expectedGain, argWeight, ARGUE_THRESHOLD } from './ai.js';
-import { simClone, res, homeOf, deriveWorld, dateOf } from './state.js';
+import { utility, candidates, expectedGain, outcomeState, argWeight, ARGUE_THRESHOLD } from './ai.js';
+import { simClone, res, homeOf, deriveWorld, dateOf, lockedOf } from './state.js';
 import { rand } from './rng.js';
 
 // Content errors (a situation's when/options/effects throwing) are swallowed so the game keeps running,
@@ -77,7 +78,7 @@ function optionEffects(s, p, o, cost) {
   payRaw(c, p, cost);
   const base = simClone(c);
   const h = makeHelpers(c, p);
-  try { o.success(h, 1); } catch (e) { report('preview', o.id, e); }
+  try { (o.preview ?? o.success)(h, 1); } catch (e) { report('preview', o.id, e); }
   deriveWorld(c);
   return effectChips(s, p, base, c);
 }
@@ -85,7 +86,7 @@ export function actionEffects(s, p, action, target) {
   const c = simClone(s);
   payCost(c, p, action, 0);
   const base = simClone(c);
-  try { applyOutcome(c, p, action, target, 'success'); } catch (e) { report('preview', action, e); }
+  try { if (isOp(ACTION_BY_ID[action])) simulateOp(c, p, action, target, 0, 'success'); else applyOutcome(c, p, action, target, 'success'); } catch (e) { report('preview', action, e); }
   return effectChips(s, p, base, c);
 }
 
@@ -98,8 +99,10 @@ function materialize(s, p, def, h) {
     const auto = o.odds == null;
     const pFinal = auto ? null : clampP(o.odds + reasons.reduce((n, r) => n + r.d, 0));
     const cost = o.cost ?? { money: 0, military: 0, political: 0 };
+    const lockOk = !o.lock || s.actors[p].military - lockedOf(s, p) - cost.military >= o.lock;
     return { id: o.id, label: o.label, text: o.text ?? '', cost, p: pFinal, band: auto ? null : band(pFinal), base: o.odds ?? null,
-      reasons: reasons.map((r) => ({ text: r.text, d: +r.d.toFixed(3) })), default: !!o.default, affordable: canAfford(s, p, cost), action: o.action ?? null, target: o.target ?? null,
+      reasons: reasons.map((r) => ({ text: r.text, d: +r.d.toFixed(3) })), default: !!o.default, affordable: canAfford(s, p, cost) && lockOk && !o.blocked, action: o.action ?? null, target: o.target ?? null,
+      op: !!o.op, eta: o.eta ?? null, lock: o.lock ?? 0, upkeep: o.upkeep ?? 0, blocked: o.blocked ?? null, opOdds: o.opOdds ? { p: o.opOdds.p, band: o.opOdds.band } : null,
       icon: o.icon ?? null, effects: s.simTag ? [] : optionEffects(s, p, o, cost) };
   });
   if (!options.some((o) => o.default)) options[options.length - 1].default = true;
@@ -160,8 +163,14 @@ function intelCard(s) {
     const delta = d.stakes?.[p] ?? 0;
     if (Math.abs(delta) >= INTEL_THRESHOLD && (!best || Math.abs(delta) > Math.abs(best.delta))) best = { d, delta };
   }
+  // Operations under way (by others, not yet complete) are watched too.
+  for (const op of liveOps(s)) {
+    if (op.actor === p || op.status !== 'preparing' || !op.stakes) continue;
+    const delta = op.stakes[p] ?? 0;
+    if (Math.abs(delta) >= INTEL_THRESHOLD && (!best || Math.abs(delta) > Math.abs(best.delta))) best = { d: { actor: op.actor, action: op.action, target: op.target }, delta, op };
+  }
   if (!best) return null;
-  const { d, delta } = best;
+  const { d, delta, op } = best;
   const act = ACTION_BY_ID[d.action];
   const who = ACTOR_BY_ID[d.actor].name;
   const tgt = d.target ? ` against ${targetName(d.target)}` : '';
@@ -169,10 +178,10 @@ function intelCard(s) {
   const pc = s.actors[p].political;
   const cost1 = { money: 0, military: 0, political: 1 };
   return {
-    id: 'intel', kind: 'intel', actor: d.actor, delta: +delta.toFixed(1),
-    title: `Intelligence: ${who} is preparing ${act.name.toLowerCase()}${tgt}`,
-    text: `${ACTOR_BY_ID[d.actor].short} sources indicate the move is planned for the coming fortnight. Your analysts judge it would ${delta > 0 ? 'help' : 'hurt'} your position${Math.abs(delta) >= 4 ? ' significantly' : ''}. Lobbying costs 1 political capital and shifts their odds by ${w} points.`,
-    at: d.target && THEATER_BY_ID[d.target] ? d.target : homeOf(d.actor),
+    id: 'intel', kind: 'intel', actor: d.actor, delta: +delta.toFixed(1), op: op?.id ?? null,
+    title: op ? `Intelligence: ${who}'s ${act.name.toLowerCase()}${tgt} ${op.kind === 'deploy' ? 'arrives' : 'completes'} in ${weeks(op.turnsLeft)}` : `Intelligence: ${who} is preparing ${act.name.toLowerCase()}${tgt}`,
+    text: `${ACTOR_BY_ID[d.actor].short} ${op ? 'preparations are visible and on schedule' : 'sources indicate the move is planned for the coming fortnight'}. Your analysts judge it would ${delta > 0 ? 'help' : 'hurt'} your position${Math.abs(delta) >= 4 ? ' significantly' : ''}. Lobbying costs 1 political capital and shifts their odds by ${w} points.`,
+    at: op ? op.at : d.target && THEATER_BY_ID[d.target] ? d.target : homeOf(d.actor),
     options: [
       { id: 'oppose', label: 'Lobby against it', text: 'Pressure, leaks, and a word in the right ears.', cost: cost1, p: null, band: null, base: null, reasons: [], default: false, affordable: pc >= 1, action: null, target: null, icon: 'cross', effects: [{ kind: 'odds', key: d.actor, label: `${ACTOR_BY_ID[d.actor].short} odds`, d: -w, good: delta > 0 ? -1 : 1, unit: '%' }] },
       { id: 'support', label: 'Quietly back it', text: 'Share intelligence and smooth the way.', cost: cost1, p: null, band: null, base: null, reasons: [], default: false, affordable: pc >= 1, action: null, target: null, icon: 'check', effects: [{ kind: 'odds', key: d.actor, label: `${ACTOR_BY_ID[d.actor].short} odds`, d: w, good: delta > 0 ? 1 : -1, unit: '%' }] },
@@ -198,10 +207,11 @@ export function proposals(s, n = 5) {
     const ev = evaluate(s, p, c.action, c.target, 0);
     const why = ev.mods.filter((m) => m.d > 0).sort((a, b) => b.d - a.d)[0]?.text ?? null;
     // Which objective moves most if it succeeds.
-    const win = simClone(s); payCost(win, p, c.action, 0); applyOutcome(win, p, c.action, c.target, 'success');
+    const act = ACTION_BY_ID[c.action];
+    const win = outcomeState(s, p, c.action, c.target, 0, 'success');
     let serves = null, bestGain = 0.02;
     for (const g of def.goals) { const gain = g.progress(win) - g.progress(s); if (gain > bestGain) { bestGain = gain; serves = g.name; } }
-    return { action: c.action, target: c.target, name: ACTION_BY_ID[c.action].name, targetName: c.target ? targetName(c.target) : null, cost: costOf(ACTION_BY_ID[c.action], 0), p: ev.p, band: ev.band, ev: +c.ev.toFixed(2), why, serves, effects: actionEffects(s, p, c.action, c.target) };
+    return { action: c.action, target: c.target, name: act.name, targetName: c.target ? targetName(c.target) : null, cost: costOf(act, 0), p: ev.p, band: ev.band, ev: +c.ev.toFixed(2), why, serves, effects: actionEffects(s, p, c.action, c.target), op: act.op ?? null, eta: act.op ? act.duration ?? 1 : null, lock: act.lock ?? 0, upkeep: act.upkeep?.money ?? 0 };
   });
 }
 
@@ -256,11 +266,13 @@ export function resolveSituations(s) {
     let text = (ok ? o.say?.success : o.say?.fail) || (ok ? `${mat.label}: it worked.` : `${mat.label}: it failed.`);
     if (outcome === 'crit') text += ' Better than anyone expected.';
     if (outcome === 'blowback') text += ' It backfired badly.';
-    const r = { kind: 'situation', actor: p, id: sit.id, option: mat.id, title: sit.title, label: mat.label, at: sit.at, p: mat.p, band: mat.band, roll, outcome, ok, text, impact: impactSince(s, p, before) };
+    const r = { kind: 'situation', actor: p, id: sit.id, option: mat.id, title: sit.title, label: mat.label, at: sit.at, p: mat.p, band: mat.band, roll, outcome, ok, text, impact: impactSince(s, p, before), action: mat.action, op: mat.op };
     out.push(r);
     s.recent.push({ turn: s.turn, kind: 'situation', actor: p, id: sit.id, option: mat.id, ok, text });
-    // An option built from a catalogue action also counts as that action, so chains and grudges see it.
-    if (mat.action) s.recent.push({ turn: s.turn, kind: 'action', actor: p, action: mat.action, target: mat.target, ok, outcome, text });
+    // An option built from a catalogue action also counts as that action, so chains and grudges see it;
+    // one built from an operation records its launch (the operation itself reports when it lands).
+    if (mat.action && !mat.op) s.recent.push({ turn: s.turn, kind: 'action', actor: p, action: mat.action, target: mat.target, ok, outcome, text });
+    else if (mat.action) s.recent.push({ turn: s.turn, kind: 'op', actor: p, action: mat.action, target: mat.target, phase: 'started', text });
     s.log.push({ turn: s.turn, kind: ok ? 'success' : 'fail', text: `${sit.title} — ${mat.label}. ${text}`, actor: p });
   }
   return out;
@@ -268,13 +280,15 @@ export function resolveSituations(s) {
 
 function resolveIntel(s, sit, mat) {
   const p = s.player;
-  const d = s.declared[sit.actor];
+  const op = sit.op ? findOp(s, sit.op) : null;
+  const d = op ? null : s.declared[sit.actor];
   let text = `You let ${ACTOR_BY_ID[sit.actor].name}'s plan play out.`;
-  if (mat.id !== 'ignore' && d) {
+  if (mat.id !== 'ignore' && (d || op)) {
     payRaw(s, p, mat.cost);
     const stance = mat.id === 'support' ? 1 : -1;
-    d.args.push({ by: p, stance, d: stance * argWeight(p), text: `${ACTOR_BY_ID[p].name} ${stance > 0 ? 'backed the move' : 'lobbied against it'}`, player: true });
-    text = `You ${stance > 0 ? 'quietly backed' : 'lobbied against'} ${ACTOR_BY_ID[sit.actor].name}'s plan.`;
+    if (op) op.bonus += stance * argWeight(p);
+    else d.args.push({ by: p, stance, d: stance * argWeight(p), text: `${ACTOR_BY_ID[p].name} ${stance > 0 ? 'backed the move' : 'lobbied against it'}`, player: true });
+    text = `You ${stance > 0 ? 'quietly backed' : 'lobbied against'} ${ACTOR_BY_ID[sit.actor].name}'s ${op ? 'operation' : 'plan'}.`;
   }
   return { kind: 'intel', actor: p, id: 'intel', option: mat.id, title: sit.title, label: mat.label, at: sit.at, target: sit.actor, p: null, outcome: 'auto', ok: true, text, impact: null };
 }
@@ -342,7 +356,7 @@ export function chooseOptionAI(s, p, sit) {
       const h = makeHelpers(c, p);
       const o = live.find((x) => x.id === mat.id);
       if (!o) return base;
-      try { if (ok) o.success(h, 1); else o.fail(h, 1); } catch (e) { report(ok ? 'success' : 'fail', `${sit.id}/${mat.id}`, e); }
+      try { if (ok) (o.preview ?? o.success)(h, 1); else o.fail(h, 1); } catch (e) { report(ok ? 'success' : 'fail', `${sit.id}/${mat.id}`, e); }
       deriveWorld(c);
       return utility(c, p);
     };
@@ -354,12 +368,12 @@ export function chooseOptionAI(s, p, sit) {
 
 // Total cost of everything the player has queued this turn.
 export function ordersTotal(s) {
-  const t = { money: 0, military: 0, political: 0 };
+  const t = { money: 0, military: 0, political: 0, lock: 0, upkeep: 0 };
   for (const sit of s.situations) {
     const o = sit.options.find((x) => x.id === sit.choice);
-    if (o) { t.money += o.cost.money || 0; t.military += o.cost.military || 0; t.political += o.cost.political || 0; }
+    if (o) { t.money += o.cost.money || 0; t.military += o.cost.military || 0; t.political += o.cost.political || 0; t.lock += o.lock || 0; t.upkeep += o.upkeep || 0; }
   }
   const init = s.orders.initiative;
-  if (init) { const c = costOf(ACTION_BY_ID[init.action], init.commit); t.money += c.money; t.military += c.military; t.political += c.political; }
+  if (init) { const act = ACTION_BY_ID[init.action], c = costOf(act, init.commit); t.money += c.money; t.military += c.military; t.political += c.political; t.lock += act.lock || 0; t.upkeep += act.upkeep?.money || 0; }
   return t;
 }

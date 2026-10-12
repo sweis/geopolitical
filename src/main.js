@@ -1,14 +1,15 @@
 // App controller: owns the game state and UI state, wires DOM events to engine calls, renders.
 import { ACTOR_BY_ID } from './data/actors.js';
 import { ACTION_BY_ID } from './engine/actions.js';
-import { newGame, choose, setInitiative, clearInitiative, endTurn, autoTurn, proposals } from './engine/game.js';
+import { newGame, choose, setInitiative, clearInitiative, endTurn, autoTurn, proposals, setStandDown } from './engine/game.js';
+import { liveOps, opStatus } from './engine/ops.js';
 import { impactLine } from './engine/director.js';
 import { createForecast, planOf } from './engine/rollout.js';
 import { setAIConfig } from './engine/ai.js';
 import { rel } from './engine/state.js';
 import { createMap, renderMap, drawArcs, drawHappenings, drawPins, flash } from './ui/mapView.js';
 import * as P from './ui/panels.js';
-import { iconSheet, actionIcon, optionIcon } from './ui/icons.js';
+import { iconSheet, actionIcon, optionIcon, OP_ICON } from './ui/icons.js';
 import { THEATER_BY_ID } from './data/theaters.js';
 const short = (id) => ACTOR_BY_ID[id]?.short ?? THEATER_BY_ID[id]?.label ?? THEATER_BY_ID[id]?.name ?? id;
 import { installDev } from './dev/dev.js';
@@ -78,7 +79,9 @@ export function render() {
   ui.target = init?.target ?? ui.target;
   const cards = {};
   for (const x of s.situations) if (x.at && !cards[x.at]) cards[x.at] = x.kind;
-  renderMap(app.map, s, { ...ui, target: init && s.theaters[init.target] ? init.target : undefined, cards });
+  const ops = {};
+  for (const op of liveOps(s)) if (op.at && s.theaters[op.at]) (ops[op.at] ??= []).push(op);
+  renderMap(app.map, s, { ...ui, target: init && s.theaters[init.target] ? init.target : undefined, cards, ops });
   const latest = s.news.at(-1)?.text ?? s.log.at(-1)?.text ?? '';
   $('#tickerText').textContent = latest;
   if (ui.pop) renderPop();
@@ -159,14 +162,15 @@ function buildHappenings() {
     if (r.kind === 'situation' && r.at) add(r.at, { icon: optionIcon({ id: r.option, label: r.label }), cls: r.ok ? 'mine' : 'mine bad', actor: null, text: `${r.label}: ${r.text}`, lines: r.lines, w: 3, title: r.label, score: Math.abs(r.impact?.dScore ?? 0), big: r.outcome === 'crit' || r.outcome === 'blowback' });
   }
   for (const r of s.results) {
-    const t = s.theaters[r.target] ? r.target : (ACTOR_BY_ID[r.target]?.home ?? ACTOR_BY_ID[r.actor]?.home);
+    const t = r.at && s.theaters[r.at] ? r.at : s.theaters[r.target] ? r.target : (ACTOR_BY_ID[r.target]?.home ?? ACTOR_BY_ID[r.actor]?.home);
     if (!t || r.outcome === 'fizzle') continue;
     const mine = r.actor === p;
     const lines = p && r.impact ? impactLine(s, p, r.impact) : [];
     const good = lines.some((l) => l.good > 0) && !lines.some((l) => l.good < 0);
     const bad = lines.some((l) => l.good < 0);
+    const isOpRow = r.kind === 'op';
     const cls = mine ? (r.ok ? 'mine' : 'mine bad') : relevant.has(r.actor) ? (bad ? 'bad' : good ? 'good' : 'rel') : 'faint';
-    add(t, { icon: actionIcon(r.action), cls, actor: r.actor, text: r.text, lines, w: mine ? 3 : relevant.has(r.actor) ? 2 : hostile(r.actor) ? 1.5 : 1, title: `${ACTION_BY_ID[r.action]?.name ?? r.action}${r.target ? ` · ${P.esc(short(r.target))}` : ''}`, score: Math.abs(r.impact?.dScore ?? 0), big: r.outcome === 'crit' || r.outcome === 'blowback' });
+    add(t, { icon: isOpRow ? OP_ICON[r.phase] ?? 'clock' : actionIcon(r.action), cls, actor: r.actor, text: r.text, lines, w: (mine ? 3 : relevant.has(r.actor) ? 2 : hostile(r.actor) ? 1.5 : 1) * (isOpRow && r.phase === 'started' ? 0.8 : 1), title: `${ACTION_BY_ID[r.action]?.name ?? r.action}${r.target ? ` · ${P.esc(short(r.target))}` : ''}${isOpRow ? ` · ${r.phase.replace('_', ' ')}` : ''}`, score: Math.abs(r.impact?.dScore ?? 0), big: r.outcome === 'crit' || r.outcome === 'blowback' });
   }
   for (const n of s.news) {
     const lines = p && n.impact ? impactLine(s, p, n.impact) : [];
@@ -327,6 +331,7 @@ function onPanelClick(e) {
     case 'noInit': clearInitiative(s); ui.action = null; render(); break;
     case 'endTurn': doEndTurn(); break;
     case 'futures': ui.tab = 'futures'; render(); break;
+    case 'standDown': { try { setStandDown(s, id, !(s.orders.standDown ?? []).includes(id)); } catch (e) { app.errors.push(String(e.message)); } render(); break; }
     case 'briefing': showBriefing(); break;
     case 'showEnd': openModal(P.endHtml(s)); break;
   }
@@ -364,7 +369,8 @@ function onTheaterHover(id, ev) {
   const top = Object.entries(t.infl).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([a, v]) => `${P.esc(ACTOR_BY_ID[a].short)} ${Math.round(v)}`).join(' · ');
   const card = app.s.situations.find((x) => x.at === id);
   const n = (app.ui.hap[id] ?? []).length;
-  tip.innerHTML = `<h4>${P.esc(document.querySelector(`[data-id="${id}"] .lbl`)?.textContent)}</h4><div>Tension <b class="mono">${Math.round(t.tension)}</b></div><div class="muted">${top}</div>${card ? `<div style="color:var(--amber)">${P.esc(card.title)}</div>` : ''}${n ? `<div class="muted">${n} ${n === 1 ? 'event' : 'events'} last fortnight · click for details</div>` : ''}${app.ui.targetable.has(id) ? '<div style="color:var(--amber)">Click to target</div>' : ''}`;
+  const ops = liveOps(app.s).filter((o) => o.at === id);
+  tip.innerHTML = `<h4>${P.esc(document.querySelector(`[data-id="${id}"] .lbl`)?.textContent)}</h4><div>Tension <b class="mono">${Math.round(t.tension)}</b></div><div class="muted">${top}</div>${card ? `<div style="color:var(--amber)">${P.esc(card.title)}</div>` : ''}${ops.map((o) => `<div class="${o.actor === app.s.player ? '' : 'muted'}">${P.esc(ACTOR_BY_ID[o.actor].short)}: ${P.esc(ACTION_BY_ID[o.action].name)} · ${P.esc(opStatus(app.s, o))}</div>`).join('')}${n ? `<div class="muted">${n} ${n === 1 ? 'event' : 'events'} last fortnight · click for details</div>` : ''}${app.ui.targetable.has(id) ? '<div style="color:var(--amber)">Click to target</div>' : ''}`;
   const r = $('#mapwrap').getBoundingClientRect();
   tip.style.left = `${Math.min(ev.clientX - r.left + 14, r.width - 250)}px`;
   tip.style.top = `${ev.clientY - r.top + 14}px`;

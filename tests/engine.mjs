@@ -6,6 +6,9 @@ import { EVENTS, THRESHOLDS } from '../src/data/events.js';
 import { MAP_W, MAP_H, project } from '../src/data/map.js';
 import { ACTIONS, canUse } from '../src/engine/actions.js';
 import { forecast } from '../src/engine/rollout.js';
+import { ACTION_BY_ID, affordable, blocked } from '../src/engine/actions.js';
+import { lockedOf } from '../src/engine/state.js';
+import { setStandDown } from '../src/engine/game.js';
 import { setAIConfig } from '../src/engine/ai.js';
 import { newGame, autoTurn, scores, choose, setInitiative, endTurn, playerMenu, previewInitiative, proposals } from '../src/engine/game.js';
 import { evaluate } from '../src/engine/adjudicate.js';
@@ -21,7 +24,7 @@ ok(THEATERS.every((t) => t.adj.every((n) => THEATER_BY_ID[n]?.adj.includes(t.id)
 ok(THEATERS.every((t) => ACTOR_BY_ID[t.controller] && Object.keys(t.infl).every((a) => ACTOR_BY_ID[a])), 'theater controllers and influence keys resolve to actors');
 ok(ACTORS.every((a) => a.home === null ? !!ANCHORS[a.id] : !!THEATER_BY_ID[a.home]), 'every actor has a home theater or map anchor');
 ok(ACTORS.every((a) => a.goals.length >= 3), 'every actor has at least 3 goals');
-ok(ACTIONS.every((x) => x.who === 'ALL' || x.who === 'NONSTATE' || x.who.every((id) => ACTOR_BY_ID[id])), 'every action who-list resolves');
+ok(ACTIONS.every((x) => x.who === 'ALL' || x.who === 'NONSTATE' || x.who === 'STATE' || x.who.every((id) => ACTOR_BY_ID[id])), 'every action who-list resolves');
 ok(EVENTS.concat(THRESHOLDS).every((e) => THEATER_BY_ID[e.at]), 'every event location resolves to a theater');
 ok(SITUATIONS.every((d) => d.id && d.kind && typeof d.when === 'function' && typeof d.options === 'function' && (Array.isArray(d.who) ? d.who.every((id) => ACTOR_BY_ID[id]) : true)), `${SITUATIONS.length} situation definitions are well-formed`);
 {
@@ -110,7 +113,7 @@ for (const seed of [1, 2, 3]) {
   ok(f1.n === 8 && f1.bands.length === s.maxTurns + 1 && f1.outcome.complete === 1 && Math.abs(f1.outcome.victory + f1.outcome.draw + f1.outcome.defeat - 1) < 1e-9, `forecast shape: ${f1.n} games, ${f1.bands.length} bands, outcomes sum to 1 (${ms.toFixed(0)} ms)`);
   ok(f1.goals.length === 5 && f1.ends.length >= 3 && f1.final.p10 <= f1.final.p50 && f1.final.p50 <= f1.final.p90 && f1.winners.length >= 1, 'forecast carries objectives, end states, winners and ordered score quantiles');
   ok(JSON.stringify(forecast(s, { n: 8, player: 'hold' })) === JSON.stringify(f1), 'forecast is deterministic for the same board');
-  setInitiative(s, 'massiveBombing', 'nuclearSites', 0);
+  setInitiative(s, 'strike', 'nuclearSites', 0);
   const f2 = forecast(s, { n: 8, player: 'orders' });
   ok(JSON.stringify(f2.means) !== JSON.stringify(f1.means), 'orders change the forecast');
   ok(f2.ends.every((e) => [-1, 0, 1].includes(e.good)) && f2.ends.some((e) => e.good !== 0), 'end states are colored by the player\'s objectives');
@@ -124,6 +127,35 @@ for (const seed of [1, 2, 3]) {
   ok(Object.values(a.policies).some((p) => p.some((x) => x.value != null)), 'improved strategies carry rollout values');
   ok(per < 2500, `turn start with rollouts: ${per.toFixed(0)} ms`);
   setAIConfig({ rollouts: 0 });
+}
+
+// Operations: weeks-long orders that commit forces, cost upkeep and gate other actions.
+{
+  const s = newGame({ seed: 3, player: 'us' });
+  ok(blocked(s, 'us', ACTION_BY_ID.massiveBombing, 'nuclearSites') === 'Reinforce CENTCOM first (6 weeks)', 'the bombing campaign needs the surge on station');
+  let threw = false; try { setInitiative(s, 'massiveBombing', 'nuclearSites', 0); } catch { threw = true; }
+  ok(threw, 'ordering a blocked action is refused');
+  const cards = s.situations.find((x) => x.id === 'us_plans');
+  ok(cards && cards.options.find((o) => o.id === 'full')?.affordable === false && /CENTCOM/.test(cards.options.find((o) => o.id === 'full')?.blocked ?? ''), 'the CENTCOM card\'s full campaign is blocked for the same reason');
+  const mil0 = s.actors.us.military;
+  setInitiative(s, 'surge', null, 0); endTurn(s);
+  const op = s.ops.find((o) => o.action === 'surge');
+  ok(op && op.status === 'preparing' && op.turnsLeft === 2 && lockedOf(s, 'us') === 20, `surge under way: ${op?.turnsLeft} turns left, 20 forces committed`);
+  ok(s.briefing.mine.some((r) => r.kind === 'op' && r.phase === 'started'), 'the briefing reports the launch');
+  ok(!affordable(s, 'us', ACTION_BY_ID.surge) || blocked(s, 'us', ACTION_BY_ID.surge, null) === 'Already under way', 'the same operation cannot be launched twice');
+  endTurn(s); endTurn(s);
+  ok(op.status === 'active' && blocked(s, 'us', ACTION_BY_ID.massiveBombing, 'tehran') === null, 'after 6 weeks the surge is on station and the campaign is available');
+  ok(ACTION_BY_ID.strike.mods(s, 'us', 'tehran').some((m) => /carrier/.test(m.text)), 'strikes get the on-station bonus');
+  ok(s.actors.us.military <= mil0 && s.actors.us.money < 100, 'the deployment cost money (upkeep) and no forces were lost to it');
+  setStandDown(s, op.id); endTurn(s);
+  ok(op.status === 'stood_down' && lockedOf(s, 'us') === 0, 'standing down releases the committed forces');
+  // Sustained and project operations run through AI games; rollouts tick them; nothing leaks.
+  const g = newGame({ seed: 5, player: 'israel' });
+  while (g.phase !== 'over') autoTurn(g);
+  const kinds = new Set(g.log.filter((l) => l.kind === 'op').map((l) => l.text.split(' launched ')[1]?.split(':')[0]).filter(Boolean));
+  ok(kinds.size >= 4, `AI actors ran ${kinds.size} kinds of operations over a game`);
+  ok(g.log.some((l) => l.kind === 'op' && /ran its course|stood down|arrived|completed|on station/i.test(l.text)) || g.log.some((l) => /arrived on station|completed a military build-up|rebuilt its fighting strength/.test(l.text)), 'operations complete, arrive or end');
+  ok(Object.values(g.actors).every((a) => a.military >= lockedOf(g, a.id) - 30), 'committed forces never exceed strength by much');
 }
 
 console.log(failures ? `\n${failures} FAILED` : '\nall engine checks passed');

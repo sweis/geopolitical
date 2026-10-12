@@ -1,7 +1,8 @@
 // Non-player actors. Each one scores every affordable (action, target, commit) by expected change in
 // its own utility, using one-ply lookahead on a cloned state, then samples with a softmax.
 // The same lookahead drives the debate: actors argue for actions that help them and against those that hurt.
-import { ACTIONS, ACTION_BY_ID, canUse, affordable, COMMIT, costOf } from './actions.js';
+import { ACTIONS, ACTION_BY_ID, canUse, affordable, COMMIT, costOf, blocked } from './actions.js';
+import { isOp, simulateOp } from './ops.js';
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { goalScore } from './goals.js';
 import { simClone as clone } from './state.js';
@@ -35,17 +36,47 @@ export function candidates(s, a) {
   for (const act of ACTIONS) {
     if (!canUse(act, a)) continue;
     for (const target of act.targets(s, a)) {
+      if (blocked(s, a, act, target)) continue;
       for (let c = 0; c < COMMIT.length; c++) if (affordable(s, a, act, c)) out.push({ action: act.id, target, commit: c });
     }
   }
   return out;
 }
 
+// The state after an action's outcome: instant actions apply at once, operations as if they went to plan.
+export function outcomeState(s, a, actionId, target, commit, outcome) {
+  const c = clone(s);
+  payCost(c, a, actionId, commit);
+  if (isOp(ACTION_BY_ID[actionId])) simulateOp(c, a, actionId, target, commit, outcome);
+  else applyOutcome(c, a, actionId, target, outcome);
+  return c;
+}
+// Operations pay off later and tie forces up meanwhile: discount by duration, and charge for the lock.
+const OP_DISCOUNT = 0.92;
+export const discountOf = (act) => (isOp(act) ? OP_DISCOUNT ** (act.duration ?? 1) : 1);
+export const lockCostOf = (act) => (isOp(act) && act.lock ? 0.03 * act.lock * Math.min(6, (act.duration ?? 1) + 2) : 0);
+
 export function expectedGain(s, a, cand, base = utility(s, a)) {
+  const act = ACTION_BY_ID[cand.action];
   const { p } = evaluate(s, a, cand.action, cand.target, cand.commit);
-  const win = clone(s); payCost(win, a, cand.action, cand.commit); applyOutcome(win, a, cand.action, cand.target, 'success');
-  const lose = clone(s); payCost(lose, a, cand.action, cand.commit); applyOutcome(lose, a, cand.action, cand.target, 'fail');
-  return p * utility(win, a) + (1 - p) * utility(lose, a) - base;
+  const win = outcomeState(s, a, cand.action, cand.target, cand.commit, 'success');
+  const lose = outcomeState(s, a, cand.action, cand.target, cand.commit, 'fail');
+  return discountOf(act) * (p * utility(win, a) + (1 - p) * utility(lose, a) - base) - lockCostOf(act);
+}
+
+// A rival's operation under way that would hurt this actor makes hitting its site worth more:
+// strike the dash before it completes, the staging area before the campaign.
+function opThreatBonus(s, a, c) {
+  const act = ACTION_BY_ID[c.action];
+  if (act.cat !== 'military' && act.cat !== 'covert') return 0;
+  let bonus = 0;
+  for (const op of s.ops) {
+    if (op.status !== 'preparing' || op.actor === a || !op.stakes) continue;
+    const harm = -(op.stakes[a] ?? 0);
+    if (harm < 1.5 || rel(s, a, op.actor) > -40) continue;
+    if (c.target === op.at || c.target === op.actor) bonus = Math.max(bonus, Math.min(4, harm));
+  }
+  return bonus;
 }
 
 // Actors who hit this one last turn. Retaliation gets a bonus so consequences follow the player around.
@@ -164,22 +195,24 @@ export function scoreCandidates(s, a) {
   for (const act of ACTIONS) {
     if (!canUse(act, a) || !affordable(s, a, act, 0)) continue;
     const cost0 = costOf(act, 0);
+    const disc = discountOf(act), opp = lockCostOf(act);
     for (const target of act.targets(s, a)) {
+      if (blocked(s, a, act, target)) continue;
       const c0 = { action: act.id, target, commit: 0 };
       const { p } = evaluate(s, a, act.id, target, 0);
-      const win = clone(s); payCost(win, a, act.id, 0); applyOutcome(win, a, act.id, target, 'success');
-      const lose = clone(s); payCost(lose, a, act.id, 0); applyOutcome(lose, a, act.id, target, 'fail');
+      const win = outcomeState(s, a, act.id, target, 0, 'success');
+      const lose = outcomeState(s, a, act.id, target, 0, 'fail');
       const uw = utility(win, a), ul = utility(lose, a);
-      const bias = grudgeBonus(s, a, c0) + flagBias(s, a, c0) + leaderBias(s, a, c0);
+      const bias = grudgeBonus(s, a, c0) + flagBias(s, a, c0) + leaderBias(s, a, c0) + opThreatBonus(s, a, c0);
       const dw = diffOf(s, win), dl = diffOf(s, lose);
-      out.push({ action: act.id, target, commit: 0, cost: cost0, p, ev: p * uw + (1 - p) * ul - base + bias, win: dw, lose: dl, extra: null, cat: act.cat });
+      out.push({ action: act.id, target, commit: 0, cost: cost0, p, ev: disc * (p * uw + (1 - p) * ul - base) - opp + bias, win: dw, lose: dl, extra: null, cat: act.cat, disc, opp });
       for (let k = 1; k < COMMIT.length; k++) {
         if (!affordable(s, a, act, k)) continue;
         const ck = costOf(act, k);
         const extra = { money: ck.money - cost0.money, military: ck.military - cost0.military, political: ck.political - cost0.political };
         const pk = clampP(p + COMMIT[k].bonus);
-        const ev = pk * utility(overlay(s, dw, a, extra), a) + (1 - pk) * utility(overlay(s, dl, a, extra), a) - base + bias;
-        out.push({ action: act.id, target, commit: k, cost: ck, p: pk, ev, win: dw, lose: dl, extra, cat: act.cat });
+        const ev = disc * (pk * utility(overlay(s, dw, a, extra), a) + (1 - pk) * utility(overlay(s, dl, a, extra), a) - base) - opp + bias;
+        out.push({ action: act.id, target, commit: k, cost: ck, p: pk, ev, win: dw, lose: dl, extra, cat: act.cat, disc, opp });
       }
     }
   }
@@ -210,7 +243,7 @@ function rolloutModel(scored, n = AI_CONFIG.modelSize) {
   const sorted = dedupe([...scored].sort(byEv));
   const out = sorted.slice(0, n);
   for (const cat of ['military', 'diplomatic', 'economic', 'covert', 'domestic']) { const best = sorted.find((c) => c.cat === cat); if (best && !out.includes(best)) out.push(best); }
-  return out.map((c) => ({ action: c.action, target: c.target, commit: c.commit, cat: c.cat, win: c.win, lose: c.lose, extra: c.extra })).concat([HOLD_ENTRY]);
+  return out.map((c) => ({ action: c.action, target: c.target, commit: c.commit, cat: c.cat, win: c.win, lose: c.lose, extra: c.extra, disc: c.disc, opp: c.opp })).concat([HOLD_ENTRY]);
 }
 
 // Everyone's mixed strategy and rollout model for this board.
@@ -231,9 +264,9 @@ export function fastPolicy(c, a, entries, k = AI_CONFIG.k) {
     let ev = 0;
     if (e.action !== 'hold') {
       const act = ACTION_BY_ID[e.action];
-      if (!affordable(c, a, act, e.commit)) continue;
+      if (!affordable(c, a, act, e.commit) || blocked(c, a, act, e.target)) continue;
       let p; try { p = evaluate(c, a, e.action, e.target, e.commit).p; } catch { continue; }
-      ev = p * utility(overlay(c, e.win, a, e.extra), a) + (1 - p) * utility(overlay(c, e.lose, a, e.extra), a) - base + grudgeBonus(c, a, e) + flagBias(c, a, e) + leaderBias(c, a, e);
+      ev = (e.disc ?? 1) * (p * utility(overlay(c, e.win, a, e.extra), a) + (1 - p) * utility(overlay(c, e.lose, a, e.extra), a) - base) - (e.opp ?? 0) + grudgeBonus(c, a, e) + flagBias(c, a, e) + leaderBias(c, a, e) + opThreatBonus(c, a, e);
     }
     scored.push({ action: e.action, target: e.target, commit: e.commit, ev });
   }
@@ -256,9 +289,7 @@ export const packPolicy = (pol) => pol.map((x) => ({ action: x.action, target: x
 
 // How much each actor gains (positive) or loses if this declaration succeeds.
 export function stakes(s, decl) {
-  const after = clone(s);
-  payCost(after, decl.actor, decl.action, decl.commit);
-  applyOutcome(after, decl.actor, decl.action, decl.target, 'success');
+  const after = outcomeState(s, decl.actor, decl.action, decl.target, decl.commit, 'success');
   const out = {};
   for (const id of Object.keys(s.actors)) if (id !== decl.actor && !s.actors[id].collapsed) out[id] = utility(after, id) - utility(s, id);
   return out;

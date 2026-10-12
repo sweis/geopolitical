@@ -14,7 +14,8 @@
 import { ACTORS } from '../data/actors.js';
 import { EVENTS } from '../data/events.js';
 import { THEATERS } from '../data/theaters.js';
-import { spawnEvent, forceOutcome, scores, choose, setInitiative, clearInitiative, endTurn, previewInitiative, proposals, ordersTotal, thresholds } from '../engine/game.js';
+import { spawnEvent, forceOutcome, scores, choose, setInitiative, clearInitiative, endTurn, previewInitiative, proposals, ordersTotal, thresholds, setStandDown } from '../engine/game.js';
+import { lockedOf } from '../engine/state.js';
 import { goalReport } from '../engine/goals.js';
 import { ACTOR_BY_ID } from '../data/actors.js';
 import { tension } from '../engine/state.js';
@@ -51,6 +52,8 @@ export function installDev(app, { startGame, render, autoStep, showStart, afterT
         declared: Object.values(s.declared).map((d) => ({ actor: d.actor, action: d.action, target: d.target, commit: d.commit, args: d.args.length })),
         situations: s.situations.map((x) => ({ id: x.id, kind: x.kind, title: x.title, at: x.at, choice: x.choice, options: x.options.map((o) => ({ id: o.id, label: o.label, p: o.p, band: o.band, cost: o.cost, affordable: o.affordable, default: o.default })) })),
         orders: { ...s.orders, total: s.player ? ordersTotal(s) : null },
+        ops: s.ops.map((o) => ({ id: o.id, actor: o.actor, action: o.action, target: o.target, kind: o.kind, status: o.status, turnsLeft: o.turnsLeft, ran: o.ran, lock: o.lock, upkeep: o.upkeep, at: o.at, stalled: o.stalled })),
+        locked: s.player ? lockedOf(s, s.player) : 0,
         briefing: b ? { turn: b.turn, mine: b.mine.length, affecting: b.affecting.length, elsewhere: b.elsewhere.length, events: b.events.length, scoreBefore: b.scoreBefore, scoreAfter: b.scoreAfter, mineOutcomes: b.mine.map((r) => ({ kind: r.kind, id: r.id ?? r.action, option: r.option ?? r.target, outcome: r.outcome, roll: r.roll })) } : null,
         results: s.results.map((r) => ({ actor: r.actor, action: r.action, target: r.target, p: r.p, roll: r.roll, outcome: r.outcome })),
         news: s.news.map((n) => n.id), logLength: s.log.length, historyLength: s.history.length, recentLength: s.recent.length,
@@ -87,6 +90,7 @@ export function installDev(app, { startGame, render, autoStep, showStart, afterT
     preview(action, target = null, commit = 0) { return previewInitiative(app.s, action, target, commit); },
     proposals() { return proposals(app.s); },
     forecast(opts = {}) { return forecast(app.s, opts); },
+    standDown(id, on = true) { setStandDown(app.s, id, on); render(); return app.s.orders.standDown; },
     showStart,
     registry: { actors: ACTORS.map((a) => a.id), theaters: THEATERS.map((t) => t.id), events: EVENTS.map((e) => e.id), cams: ['overview', 'levant', 'gulf', 'hero-close', 'hud-check'] },
   };

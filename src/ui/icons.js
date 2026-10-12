@@ -13,6 +13,7 @@ const SYMBOLS = {
   flag: P('M5 21V4M5 4h12l-3 4 3 4H5'),
   shield: P('M12 3l8 3v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-3z'),
   pause: P('M8 5v14M16 5v14'),
+  clock: `<circle cx="12" cy="12" r="9"/>${P('M12 7v5l3.5 2')}`,
   alert: P('M12 3l10 18H2L12 3zM12 10v5M12 18v.5'),
   star: P('M12 3l2.8 6 6.2.7-4.6 4.3 1.3 6.3L12 17l-5.7 3.3 1.3-6.3L3 9.7 9.2 9z'),
   bolt: P('M13 2L4 14h7l-1 8 9-12h-7l1-8z'),
@@ -65,3 +66,4 @@ export function optionIcon(o) {
 
 export const KIND_ICON = { crisis: 'alert', opportunity: 'star', intel: 'eye' };
 export const OUTCOME_ICON = { success: 'check', crit: 'diamond', fail: 'cross', blowback: 'skull', fizzle: 'pause', auto: 'check' };
+export const OP_ICON = { started: 'clock', arrived: 'anchor', done: 'check', failed: 'cross', stood_down: 'pause', disrupted: 'burst', stalled: 'alert' };

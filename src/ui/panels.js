@@ -4,11 +4,12 @@ import { ACTORS, ACTOR_BY_ID } from '../data/actors.js';
 import { THEATER_BY_ID } from '../data/theaters.js';
 import { WORLD_LABELS, WORLD_SHORT } from '../data/world.js';
 import { ACTION_BY_ID, COMMIT, costOf, affordable, targetName } from '../engine/actions.js';
+import { liveOps, opStatus, weeks } from '../engine/ops.js';
 import { goalReport, goalScore, goalKeys } from '../engine/goals.js';
-import { dateOf, rel } from '../engine/state.js';
+import { dateOf, rel, lockedOf } from '../engine/state.js';
 import { playerMenu, previewInitiative, thresholds, scores, ordersTotal } from '../engine/game.js';
 import { actionEffects } from '../engine/director.js';
-import { icon, actionIcon, optionIcon, KIND_ICON, OUTCOME_ICON } from './icons.js';
+import { icon, actionIcon, optionIcon, KIND_ICON, OUTCOME_ICON, OP_ICON } from './icons.js';
 
 // The forecast view (set by the controller): { hold, orders, running, hasOrders, history }.
 export const VIEW = { fc: null };
@@ -66,7 +67,7 @@ export function actorCardHtml(s) {
     <div class="ac-score" title="Score · victory at ${th.victory}"><div class="n">${sc.toFixed(0)}</div><div class="l">win ≥ ${th.victory}</div></div></div>
     <div class="res">
       <div title="Treasury"><span class="k">${icon('coin')}</span><span class="v">$${Math.floor(a.money)}</span>${bar(a.money, 120)}</div>
-      <div title="Military strength"><span class="k">${icon('shield')}</span><span class="v">${Math.floor(a.military)}</span>${bar(a.military)}</div>
+      <div title="Military strength${lockedOf(s, s.player) ? ` · ${Math.floor(lockedOf(s, s.player))} committed to operations` : ''}"><span class="k">${icon('shield')}</span><span class="v">${lockedOf(s, s.player) ? `${Math.floor(a.military - lockedOf(s, s.player))}<span class="muted">/${Math.floor(a.military)}</span>` : Math.floor(a.military)}</span><i class="mbar"><b style="width:${Math.max(0, Math.min(100, a.military))}%"></b>${lockedOf(s, s.player) ? `<u style="width:${Math.min(100, lockedOf(s, s.player))}%"></u>` : ''}</i></div>
       <div title="Political capital"><span class="k">${icon('people')}</span><span class="v">${Math.floor(a.political)}</span>${bar(a.political, 20)}</div>
       <div title="Stability (0 = collapse)"><span class="k">${icon('flag')}</span><span class="v">${Math.floor(a.stability)}</span>${bar(a.stability)}</div>
     </div>`;
@@ -85,11 +86,35 @@ export function commandHtml(s, ui) {
   if (!s.player) return `<p class="muted">Observer mode. Use the dev hooks (step / resume) to advance.</p>${s.briefing ? elsewhereHtml(s.briefing) : ''}`;
   if (s.actors[s.player].collapsed || s.phase === 'over') return `<div class="btnrow"><button class="primary" data-act="showEnd">See the outcome →</button></div>`;
   let h = `<div class="turnhead"><span class="muted small">${s.turn === 1 ? 'Opening moves' : `Turn ${s.turn}`}</span>${s.briefing ? `<button class="ghost small" data-act="briefing">${icon('bolt')} Last fortnight</button>` : ''}</div>`;
+  h += opsHtml(s, ui);
   h += situationsHtml(s, ui);
   h += initiativeHtml(s, ui);
   h += ordersHtml(s, ui);
   return h;
 }
+
+// ── operations under way: progress, committed forces, stand-down orders ──
+function opsHtml(s, ui) {
+  const mine = liveOps(s, s.player);
+  if (!mine.length) return '';
+  const sd = new Set(s.orders.standDown ?? []);
+  let h = `<h3>Operations under way</h3><div class="ops">`;
+  for (const op of mine) {
+    const act = ACTION_BY_ID[op.action];
+    const running = op.status === 'active' && op.kind === 'sustained';
+    const total = running ? op.maxTurns || 8 : op.duration;
+    const done = running ? op.ran : op.duration - op.turnsLeft;
+    const pct = op.status === 'active' && op.kind === 'deploy' ? 100 : Math.round((100 * done) / Math.max(1, total));
+    const off = sd.has(op.id);
+    h += `<div class="oprow ${op.status} ${off ? 'off' : ''}" data-op="${esc(op.id)}"><span class="oic">${icon(actionIcon(op.action))}</span>
+      <div class="body"><div class="nm"><b>${esc(act.name)}</b>${op.target ? ` <span class="muted">· ${esc(targetName(op.target))}</span>` : ''}</div>
+      <div class="st small ${op.stalled ? 'down' : 'muted'}">${esc(opStatus(s, op))}${off ? ' · <span class="down">standing down at end of turn</span>' : ''}</div>
+      <div class="obar2"><i style="width:${pct}%"></i></div></div>
+      <div class="side"><span class="small muted">${op.lock ? `<span title="Forces committed">${icon('shield')}${op.lock}</span>` : ''}${op.upkeep ? `<span title="Upkeep per fortnight">${icon('coin')}${op.upkeep}/t</span>` : ''}</span><button class="ghost small" data-act="standDown" data-id="${esc(op.id)}">${off ? 'Keep going' : 'Stand down'}</button></div></div>`;
+  }
+  return h + `</div>`;
+}
+const etaChip = (o) => (o.op ? `<span class="eta" title="${o.op === 'sustained' && o.eta <= 1 ? 'Runs fortnight after fortnight until stood down' : `Takes ${weeks(o.eta)}`}${o.lock ? ` · commits ${o.lock} military` : ''}${o.upkeep ? ` · $${o.upkeep} per fortnight` : ''}">${icon('clock')}${o.op === 'sustained' && o.eta <= 1 ? 'ongoing' : `${o.eta * 2} wk`}</span>` : '');
 
 function situationsHtml(s, ui) {
   if (!s.situations.length) return `<h3>Situations</h3><p class="muted small">A quiet fortnight.</p>`;
@@ -104,7 +129,7 @@ function situationsHtml(s, ui) {
       const on = sit.choice === o.id;
       h += `<div class="optrow ${on ? 'on' : ''} ${o.affordable ? '' : 'disabled'}" data-act="choose" data-sit="${esc(sit.id)}" data-opt="${esc(o.id)}" role="radio" aria-checked="${on}" tabindex="0" title="${esc(o.text)}">
         <span class="radio"></span><span class="oic">${icon(optionIcon(o))}</span>
-        <span class="body"><span class="lbl">${esc(o.label)}</span> ${pips(o.p, o.band)}${chips(o.effects)}${on && o.text ? `<span class="small muted desc">${esc(o.text)}</span>` : ''}</span>
+        <span class="body"><span class="lbl">${esc(o.label)}</span> ${o.op && o.opOdds ? pips(o.opOdds.p, o.opOdds.band) : pips(o.p, o.band)}${etaChip(o)}${o.blocked ? `<span class="lockTag">${esc(o.blocked)}</span>` : ''}${chips(o.effects)}${on && o.text ? `<span class="small muted desc">${esc(o.text)}</span>` : ''}</span>
         ${costHtml(o.cost)}</div>`;
     }
     h += `</div>`;
@@ -129,7 +154,7 @@ function initiativeHtml(s, ui) {
     const on = init && init.action === p.action && init.target === p.target;
     h += `<button class="prop ${on ? 'on' : ''}" data-act="prop" data-action="${esc(p.action)}" data-target="${p.target == null ? '' : esc(p.target)}" title="${esc(ACTION_BY_ID[p.action].desc)}">
       <span class="oic">${icon(actionIcon(p.action))}</span>
-      <span class="body"><span class="nm">${esc(p.name)}${p.targetName ? ` <span class="muted">· ${esc(p.targetName)}</span>` : ''}</span> ${pips(p.p, p.band)}${chips(p.effects)}</span>
+      <span class="body"><span class="nm">${esc(p.name)}${p.targetName ? ` <span class="muted">· ${esc(p.targetName)}</span>` : ''}</span> ${pips(p.p, p.band)}${etaChip(p)}${chips(p.effects)}</span>
       ${costHtml(p.cost)}</button>`;
   }
   h += `</div><div class="rowbtns"><button class="ghost small" data-act="toggleAll">${ui.showAll ? 'Hide the full list' : 'All orders ▾'}</button>${init ? `<button class="ghost small" data-act="noInit">${icon('pause')} Hold instead</button>` : ''}</div>`;
@@ -143,9 +168,9 @@ function catalogueHtml(s, ui) {
   const menu = playerMenu(s).filter((m) => ui.cat === 'all' || m.cat === ui.cat);
   let h = `<div class="chips">${CATS.map((c) => `<button data-act="cat" data-id="${c}" class="${ui.cat === c ? 'on' : ''}">${c[0].toUpperCase() + c.slice(1)}</button>`).join('')}</div><div class="alist">`;
   for (const m of menu) {
-    const usable = m.affordable && m.targets.length;
-    h += `<button class="arow ${ui.action === m.id ? 'on' : ''}" data-act="action" data-id="${m.id}" ${usable ? '' : 'disabled'} title="${esc(usable ? m.desc : m.targets.length ? 'Cannot afford' : 'No valid targets')}">
-      <span class="oic">${icon(actionIcon(m.id))}</span><span class="body"><span class="nm">${esc(m.name)}</span></span>${costHtml(m.cost)}</button>`;
+    const usable = m.affordable && m.targets.length && !m.blocked;
+    h += `<button class="arow ${ui.action === m.id ? 'on' : ''}" data-act="action" data-id="${m.id}" ${usable ? '' : 'disabled'} title="${esc(usable ? m.desc : m.blocked ? m.blocked : m.targets.length ? 'Cannot afford' : 'No valid targets')}">
+      <span class="oic">${icon(actionIcon(m.id))}</span><span class="body"><span class="nm">${esc(m.name)}</span>${m.op ? etaChip({ op: m.op, eta: m.duration, lock: m.lock, upkeep: m.upkeep }) : ''}${m.blocked ? `<span class="lockTag">${esc(m.blocked)}</span>` : ''}</span>${costHtml(m.cost)}</button>`;
   }
   h += `</div>`;
   if (ui.action && !s.orders.initiative) {
@@ -165,6 +190,7 @@ function initiativeDetail(s, ui, init) {
   if (ev.debate) extra.push({ text: `${opp.length ? `Opposition: ${opp.map((a) => ACTOR_BY_ID[a.by].short).join(', ')}` : ''}${opp.length && sup.length ? '; ' : ''}${sup.length ? `backing: ${sup.map((a) => ACTOR_BY_ID[a.by].short).join(', ')}` : ''}`, d: ev.debate });
   let h = `<div class="box init"><div class="nm">${icon(actionIcon(act.id))} <b>${esc(act.name)}</b>${init.target ? ` <span class="muted">· ${esc(targetName(init.target))}</span>` : ''}</div>`;
   h += `<div class="seg">${COMMIT.map((c, i) => `<button data-act="commit" data-id="${i}" class="${init.commit === i ? 'on' : ''}" ${affordable(s, s.player, act, i) ? '' : 'disabled'}>${c.label}<br>${costHtml(costOf(act, i))}</button>`).join('')}</div>`;
+  if (act.op) h += `<div class="opline small">${icon('clock')} ${act.op === 'sustained' && (act.duration ?? 1) <= 1 ? `Runs fortnight after fortnight${act.maxTurns ? ` (up to ${weeks(act.maxTurns)})` : ''} until you stand it down` : `${act.op === 'deploy' ? 'On station' : act.op === 'project' ? 'Completes' : 'Begins'} in ${weeks(act.duration ?? 1)}${act.op === 'deploy' ? ', then stays until stood down' : ''}`}${act.lock ? ` · commits ${icon('shield')}${act.lock}` : ''}${act.upkeep?.money ? ` · upkeep ${icon('coin')}${act.upkeep.money} per fortnight` : ''}. The odds shown are for ${act.op === 'sustained' ? 'each fortnight' : 'completion'}.</div>`;
   h += `<div class="odds">${pips(ev.p, ev.band)}${opp.map((a) => `<span class="lob down" title="${esc(ACTOR_BY_ID[a.by].name)} will lobby against it">${dot(a.by)}▼</span>`).join('')}${sup.map((a) => `<span class="lob up" title="${esc(ACTOR_BY_ID[a.by].name)} will back it">${dot(a.by)}▲</span>`).join('')}</div>`;
   h += chips(actionEffects(s, s.player, init.action, init.target));
   const open = ui.why.has('init');
@@ -175,18 +201,20 @@ function initiativeDetail(s, ui, init) {
 
 function ordersHtml(s, ui) {
   const t = ordersTotal(s), a = s.actors[s.player];
-  const over = t.money > a.money || t.military > a.military || t.political > a.political;
+  const over = t.money > a.money || t.military + t.lock > a.military - lockedOf(s, s.player) || t.political > a.political;
   const unanswered = s.situations.filter((x) => !x.choice).length;
-  return `<div class="orders ${over ? 'over' : ''}"><div class="ocol">${outlookHtml()}<div class="small">${costHtml(t)}${over ? '<div class="down">Over budget</div>' : ''}${unanswered ? `<div class="muted">${unanswered} unanswered</div>` : ''}</div></div>
+  return `<div class="orders ${over ? 'over' : ''}"><div class="ocol">${outlookHtml()}<div class="small">${costHtml(t)}${t.lock ? `<span class="muted" title="Forces committed to operations">${icon('shield')}${t.lock} committed</span>` : ''}${over ? '<div class="down">Over budget</div>' : ''}${unanswered ? `<div class="muted">${unanswered} unanswered</div>` : ''}</div></div>
     <button class="primary" data-act="endTurn" ${over ? 'disabled' : ''}>End turn →</button></div>`;
 }
 
 // ── briefing overlay: what happened, filtered to what matters to you ──
+const OP_PHASE = { started: 'Launched', arrived: 'On station', done: 'Completed', failed: 'Failed', stood_down: 'Stood down', disrupted: 'Set back', stalled: 'Stalled' };
 function resultRow(r, mine = false) {
-  const tag = r.outcome === 'auto' ? 'auto' : r.outcome;
-  const ic = r.kind === 'situation' || r.kind === 'intel' ? optionIcon({ id: r.option, label: r.label }) : actionIcon(r.action);
-  const title = r.kind === 'situation' ? `<span class="muted">${esc(r.title)}</span> · <b>${esc(r.label)}</b>` : r.kind === 'intel' ? `<b>${esc(r.label)}</b>` : `<b>${esc(ACTION_BY_ID[r.action]?.name ?? r.action)}${r.target ? ` · ${esc(targetName(r.target))}` : ''}</b>`;
-  return `<div class="brow ${mine ? 'mine' : ''} ${r.ok ? 'ok' : 'bad'}"><span class="oc ${tag}" title="${OUTCOME[tag] ?? tag}">${icon(OUTCOME_ICON[tag] ?? 'diamond')}</span><span class="oic">${mine ? icon(ic) : dot(r.actor)}</span><div class="bbody">${mine ? `<div class="small">${title}</div>` : ''}<div class="narr small">${esc(r.text)}</div>${chips(r.lines)}</div></div>`;
+  const isOpRow = r.kind === 'op';
+  const tag = isOpRow ? (r.phase === 'failed' || r.phase === 'disrupted' || r.phase === 'stalled' ? 'fail' : 'auto') : r.outcome === 'auto' ? 'auto' : r.outcome;
+  const ic = isOpRow ? OP_ICON[r.phase] ?? 'clock' : r.kind === 'situation' || r.kind === 'intel' ? optionIcon({ id: r.option, label: r.label }) : actionIcon(r.action);
+  const title = isOpRow ? `<b>${esc(ACTION_BY_ID[r.action]?.name ?? r.action)}${r.target ? ` · ${esc(targetName(r.target))}` : ''}</b> <span class="muted">· ${OP_PHASE[r.phase] ?? r.phase}</span>` : r.kind === 'situation' ? `<span class="muted">${esc(r.title)}</span> · <b>${esc(r.label)}</b>` : r.kind === 'intel' ? `<b>${esc(r.label)}</b>` : `<b>${esc(ACTION_BY_ID[r.action]?.name ?? r.action)}${r.target ? ` · ${esc(targetName(r.target))}` : ''}</b>`;
+  return `<div class="brow ${mine ? 'mine' : ''} ${r.ok ? 'ok' : 'bad'} ${isOpRow ? 'oprow-b' : ''}"><span class="oc ${tag}" title="${isOpRow ? OP_PHASE[r.phase] ?? r.phase : OUTCOME[tag] ?? tag}">${icon(isOpRow ? ic : OUTCOME_ICON[tag] ?? 'diamond')}</span><span class="oic">${mine ? icon(isOpRow ? actionIcon(r.action) : ic) : dot(r.actor)}</span><div class="bbody">${mine ? `<div class="small">${title}</div>` : ''}<div class="narr small">${esc(r.text)}</div>${chips(r.lines)}</div></div>`;
 }
 function sparkline(vals, w = 220, h = 36) {
   if (vals.length < 2) return '';
@@ -246,6 +274,8 @@ export function intelHtml(s, ui) {
     if (decl.length) h += `<h3>Reported intentions</h3><div class="intent">` + decl.map((d) => `<span title="${esc(ACTOR_BY_ID[d.actor].name)}: ${esc(ACTION_BY_ID[d.action].name)}${d.target ? ` · ${esc(targetName(d.target))}` : ''}">${dot(d.actor)}${icon(actionIcon(d.action))}${d.target ? `<span class="muted">${esc(short(d.target))}</span>` : ''}</span>`).join('') + `</div>`;
     h += intentsHtml(s);
   }
+  const ops = liveOps(s).filter((o) => o.actor !== s.player);
+  if (ops.length) h += `<h3>Operations under way</h3><div class="oplist">${ops.map((o) => `<div class="small"><span class="who">${dot(o.actor)}${esc(ACTOR_BY_ID[o.actor].short)}</span> ${icon(actionIcon(o.action))} ${esc(ACTION_BY_ID[o.action].name)}${o.target ? ` <span class="muted">· ${esc(short(o.target))}</span>` : ''} <span class="muted">· ${esc(opStatus(s, o))}</span></div>`).join('')}</div>`;
   h += `<h3>Actors</h3><table class="lb"><tr class="muted"><td></td><td class="n">${icon('coin')}</td><td class="n">${icon('shield')}</td><td class="n">${icon('flag')}</td>${s.player ? '<td class="n">Rel</td>' : ''}</tr>`;
   for (const a of ACTORS) {
     const r = s.actors[a.id];
@@ -288,6 +318,7 @@ export function helpHtml() {
     <div>${icon('crosshair')}<b>Initiative.</b> One move of your own. Advisers rank the best; the full list is a click away. Dots show who will lobby for (▲) or against (▼) it.</div>
     <div>${icon('bolt')}<b>End turn.</b> Everything resolves at once. The briefing shows your results and what touched you; the rest folds away.</div>
     <div>${icon('flag')}<b>Win.</b> Raise your score by 28 (to at least 75) by turn 16. Meet every objective after turn 6 to win outright. Stability 0 is collapse.</div>
+    <div>${icon('clock')}<b>Operations.</b> Some orders take weeks: a carrier surge, a build-up, talks, a campaign. They commit forces and cost upkeep until they land or you stand them down, and everyone can see them coming.</div>
     <div>${icon('eye')}<b>Outlook.</b> Before you commit, the game plays itself out to the end many times from this board, every actor pursuing its own interests. The Futures tab shows how often you win, the likely end states, and how your orders change them.</div>
   </div>
   <div class="btnrow"><button class="primary" data-act="closeModal">Back</button></div></div>`;
@@ -331,6 +362,8 @@ export function theaterPopHtml(s, tid, happenings = []) {
   let h = `<div class="pop-head"><b>${esc(def.name)}</b><span class="muted small">tension ${Math.round(t.tension)}</span><button class="x" data-act="closePop" title="Close">×</button></div>`;
   h += `<div class="pop-infl">${infl.map(([id, v]) => `<span title="${esc(ACTOR_BY_ID[id].name)} ${Math.round(v)}">${dot(id)}<i class="bar"><b style="width:${v}%;background:${ACTOR_BY_ID[id].color}"></b></i></span>`).join('')}</div>`;
   if (cards.length) h += `<div class="pop-cards">${cards.map((c) => `<button data-act="gotoCard" data-id="${esc(c.id)}" class="${c.kind}">${icon(KIND_ICON[c.kind])}<span>${esc(c.title)}</span></button>`).join('')}</div>`;
+  const ops = liveOps(s).filter((o) => o.at === tid);
+  if (ops.length) h += `<div class="pop-ops">${ops.map((o) => `<div class="small ${o.actor === s.player ? 'mine' : ''}">${dot(o.actor)}${icon(actionIcon(o.action))} ${esc(ACTION_BY_ID[o.action].name)} <span class="muted">· ${esc(opStatus(s, o))}</span></div>`).join('')}</div>`;
   if (happenings.length) {
     h += `<div class="pop-hap">${happenings.slice(0, 6).map((x) => `<div class="hrow ${x.cls}"><span class="oic">${icon(x.icon)}</span><div class="bbody">${x.actor ? dot(x.actor) : ''}<span class="small">${esc(x.text)}</span>${chips(x.lines)}</div></div>`).join('')}${happenings.length > 6 ? `<div class="small muted">+${happenings.length - 6} more in the log</div>` : ''}</div>`;
   } else h += `<div class="small muted pop-empty">Quiet this fortnight.</div>`;

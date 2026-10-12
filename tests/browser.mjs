@@ -41,10 +41,17 @@ async function frameStats(page, path) {
 }
 // Real mouse input at the element's on-screen centre (scrolling it into view first, as a player would).
 const click = async (page, sel) => {
-  const loc = page.locator(sel).first();
-  await loc.scrollIntoViewIfNeeded({ timeout: 5000 });
-  const b = await loc.boundingBox();
-  await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+  // Background forecasts re-render the panel; if the element is replaced mid-click, find it again.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const loc = page.locator(sel).first();
+      await loc.scrollIntoViewIfNeeded();
+      const box = await loc.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForTimeout(60);
+      return;
+    } catch (e) { if (attempt >= 3) throw e; await page.waitForTimeout(150); }
+  }
 };
 const state = (page) => page.evaluate(() => game.getState());
 
@@ -84,6 +91,8 @@ const state = (page) => page.evaluate(() => game.getState());
   ok(!!s.orders.initiative, `proposal selected as initiative: ${s.orders.initiative?.action} ${s.orders.initiative?.target ?? ''}`);
   // Open the full list, choose air strikes, and target Hormuz by clicking the map marker.
   await click(page, '[data-act="toggleAll"]');
+  const mb = page.locator('[data-act="action"][data-id="massiveBombing"]');
+  ok((await mb.count()) === 1 && (await mb.isDisabled()) && /CENTCOM/.test(await mb.getAttribute('title')), 'catalogue: the bombing campaign is locked behind the surge, with the reason');
   await click(page, '[data-act="action"][data-id="strike"]');
   s = await state(page);
   ok(s.ui.action === 'strike' && !s.orders.initiative, 'catalogue action selected; waiting for a target');
@@ -146,6 +155,28 @@ const state = (page) => page.evaluate(() => game.getState());
   await frameStats(page, OUT + 'popover.png');
   await click(page, '#mapPop [data-act="closePop"]');
   ok(!(await pop.isVisible()), 'popover closes');
+  // Operations: order the surge by mouse, see it under way next turn, stand it down.
+  await click(page, '[data-act="toggleAll"]');
+  await click(page, '[data-act="action"][data-id="surge"]');
+  s = await state(page);
+  ok(s.orders.initiative?.action === 'surge' && /6 weeks/.test(await page.locator('.box.init .opline').innerText()), 'surge ordered; the initiative shows it takes 6 weeks');
+  ok(/20 committed/.test(await page.locator('.orders').innerText()), 'orders bar shows the forces the surge commits');
+  await click(page, '[data-act="endTurn"]');
+  await page.waitForFunction(() => game.getState().turn === 3, null, { timeout: 20000 });
+  await click(page, '[data-act="continue"]');
+  s = await state(page);
+  const surge = s.ops.find((o) => o.action === 'surge' && o.actor === 'us');
+  ok(surge && surge.status === 'preparing' && surge.turnsLeft === 2 && s.locked === 20, `surge under way (${surge?.turnsLeft} turns left, ${s.locked} committed)`);
+  ok((await page.locator('#panel .oprow').count()) >= 1 && /arrives in 4 weeks/.test(await page.locator('#panel .oprow').first().innerText()), 'operations panel shows the surge with its arrival time');
+  ok(/75\/95|\/\d+/.test(await page.locator('#actorCard').innerText()), 'actor card shows available / total forces');
+  ok((await page.locator('#map .opring.on').count()) >= 1, 'map rings the theaters with operations under way');
+  await frameStats(page, OUT + 'ops.png');
+  await click(page, '#panel .oprow [data-act="standDown"]');
+  s = await state(page);
+  ok(s.orders.standDown.length === 1 && /standing down/.test(await page.locator('#panel .oprow').first().innerText()), 'stand-down order marked');
+  await click(page, '#panel .oprow [data-act="standDown"]');
+  s = await state(page);
+  ok(s.orders.standDown.length === 0, 'stand-down order cleared');
   ok(page.errors.length === 0, `play path: no console errors ${JSON.stringify(page.errors)}`);
 
   // 4. Stills sweep: every actor in the registry, every named camera.
