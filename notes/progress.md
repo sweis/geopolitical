@@ -92,6 +92,8 @@ AI: candidates exclude blocked actions; operations are valued as if they went to
 
 Costs: the one-ply plan is ~10% dearer (prerequisite checks), a 20-game forecast ~1.2 s in Chromium.
 
+Balance after operations (`node tests/verdicts.mjs 3`: 17 W / 37 D / 3 L, SDF and ISIS the losing seats; `node tests/policies.mjs 5`, mean score and W/D/L): US force 59 (0/2/3, support 1), talk 71 (0/5/0), AI 70 (1/4/0); Israel force 47, talk 36, AI 57; Iran force 62, talk 68, AI 72. The all-force US now has to surge first and still loses more than it wins.
+
 ### Dev hooks (`?dev=1`)
 `window.game`: `getState()` (includes `policies` and `forecast`), `start(actor, seed)`, `setSeed`, `teleport`, `cam(name)`, `freeze/resume/step/setTurn`, `spawn`, `clearAll`, `win/lose`, and scripted play `choose(sitId, optId)`, `order(action, target, commit)`, `clearOrder()`, `endTurn()`, `preview()`, `proposals()`, `forecast({ n, player })` (synchronous), `registry`. URL params: `seed`, `play`, `auto`, `autodt`, `cam`, `ai=shallow`, `noforecast`, `runs`.
 Not applicable (2D turn-based): `setTimeOfDay` returns false; draw calls/shader counts are null.

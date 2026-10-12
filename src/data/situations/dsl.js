@@ -92,7 +92,7 @@ export function fromAction(h, actionId, target, o = {}) {
   const phase = act.op === 'deploy' ? 'arrives' : act.op === 'project' ? 'completes' : 'under way';
   return {
     ...common, text: `${o.text ?? act.desc} ${act.op === 'sustained' && dur <= 1 ? 'Runs fortnight after fortnight until stood down.' : `Takes ${weeks(dur)}.`}`,
-    odds: null, reasons: [], op: true, eta: dur, lock: act.lock ?? 0, upkeep: act.upkeep?.money ?? 0, blocked: blocked(h.s, h.p, act, target), opOdds: { p: pOp, band: band(pOp), reasons },
+    odds: null, reasons: [], op: act.op, eta: dur, lock: act.lock ?? 0, upkeep: act.upkeep?.money ?? 0, blocked: blocked(h.s, h.p, act, target), opOdds: { p: pOp, band: band(pOp), reasons },
     success: (h2, m) => { startOp(h2.s, h2.p, actionId, target, 0, { bonus: o.bonus ?? 0, source: 'card' }); o.success?.(h2, m); },
     fail: () => {},
     preview: (h2, m) => { simulateOp(h2.s, h2.p, actionId, target, 0, 'success'); o.success?.(h2, m); },

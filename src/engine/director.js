@@ -102,7 +102,7 @@ function materialize(s, p, def, h) {
     const lockOk = !o.lock || s.actors[p].military - lockedOf(s, p) - cost.military >= o.lock;
     return { id: o.id, label: o.label, text: o.text ?? '', cost, p: pFinal, band: auto ? null : band(pFinal), base: o.odds ?? null,
       reasons: reasons.map((r) => ({ text: r.text, d: +r.d.toFixed(3) })), default: !!o.default, affordable: canAfford(s, p, cost) && lockOk && !o.blocked, action: o.action ?? null, target: o.target ?? null,
-      op: !!o.op, eta: o.eta ?? null, lock: o.lock ?? 0, upkeep: o.upkeep ?? 0, blocked: o.blocked ?? null, opOdds: o.opOdds ? { p: o.opOdds.p, band: o.opOdds.band } : null,
+      op: o.op || false, eta: o.eta ?? null, lock: o.lock ?? 0, upkeep: o.upkeep ?? 0, blocked: o.blocked ?? null, opOdds: o.opOdds ? { p: o.opOdds.p, band: o.opOdds.band } : null,
       icon: o.icon ?? null, effects: s.simTag ? [] : optionEffects(s, p, o, cost) };
   });
   if (!options.some((o) => o.default)) options[options.length - 1].default = true;
